@@ -242,9 +242,9 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-w);font-
 .sig-actions{display:flex;gap:10px;}
 .btn-sig-cancel{flex:0 0 auto;padding:12px 18px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--text-w3);font-family:var(--font);font-size:13px;cursor:pointer;}
 .btn-sig-clear{flex:0 0 auto;padding:12px 20px;border-radius:var(--radius-sm);border:1.5px solid var(--border-w2);background:transparent;color:var(--text-w2);font-family:var(--font);font-size:14px;cursor:pointer;}
-.btn-sig-confirm{flex:1;padding:12px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:var(--font);font-size:15px;font-weight:600;color:#fff;cursor:pointer;transition:all .15s;}
+.btn-sig-confirm{flex:1;padding:12px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:var(--font);font-size:15px;font-weight:600;color:#fff;cursor:pointer;transition:all .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .btn-sig-confirm:hover{background:#16a34a;}
-.btn-sig-confirm:disabled{opacity:.35;cursor:not-allowed;}
+.btn-sig-confirm:disabled{opacity:.35;cursor:not-allowed;pointer-events:none;}
 
 /* ═══ SUCCESS FLASH ═══ */
 .success-flash{display:none;position:fixed;inset:0;z-index:300;align-items:center;justify-content:center;background:rgba(34,197,94,.1);backdrop-filter:blur(3px);}
@@ -862,7 +862,7 @@ var PIN = '1234';
    2. GDRIVE_FOLDER_URL → your restricted shared Drive folder link
    ═══════════════════════════════════════════════════════════════════ */
 var GOOGLE_CLIENT_ID  = '985606939375-rimlr7sqkpvva5lsvj61nq85ao4qcmfo.apps.googleusercontent.com';
-var GDRIVE_FOLDER_URL = 'YOUR_GOOGLE_DRIVE_FOLDER_URL';
+var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1XwWAM38H4KKHS4hqprIWQLTqBDs0VGw5?usp=drive_link';
 var ALLOWED_DOMAIN    = 'gamma.edu.au';
 
 /* ─── Auth state ─── */
@@ -1919,13 +1919,29 @@ function initCanvas(){var w=canvas.parentElement.clientWidth||560;var dpr=window
 function getPos(e){var r=canvas.getBoundingClientRect(),src=e.touches?e.touches[0]:e;return{x:src.clientX-r.left,y:src.clientY-r.top};}
 function startDraw(e){e.preventDefault();drawing=true;var p=getPos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);}
 function moveDraw(e){e.preventDefault();if(!drawing)return;var p=getPos(e);ctx.lineTo(p.x,p.y);ctx.stroke();hasDrawn=true;document.getElementById('btn-sig-confirm').disabled=false;}
-function endDraw(e){e.preventDefault();drawing=false;}
-canvas.addEventListener('mousedown',startDraw);canvas.addEventListener('mousemove',moveDraw);canvas.addEventListener('mouseup',endDraw);canvas.addEventListener('mouseleave',endDraw);
-canvas.addEventListener('touchstart',startDraw,{passive:false});canvas.addEventListener('touchmove',moveDraw,{passive:false});canvas.addEventListener('touchend',endDraw,{passive:false});
-/* Re-init canvas on resize / orientation change so it fills the new width correctly */
+/* BUG FIX: mouse endDraw keeps preventDefault (prevents ghost clicks after mouse events).
+   Touch endDraw does NOT call preventDefault — on iOS/iPadOS, preventDefault on touchend
+   suppresses the subsequent tap on the Confirm button, making it appear non-responsive. */
+function endDrawMouse(e){e.preventDefault();drawing=false;}
+function endDrawTouch(e){drawing=false;}   /* intentionally no preventDefault */
+canvas.addEventListener('mousedown',startDraw);canvas.addEventListener('mousemove',moveDraw);
+canvas.addEventListener('mouseup',endDrawMouse);canvas.addEventListener('mouseleave',endDrawMouse);
+canvas.addEventListener('touchstart',startDraw,{passive:false});
+canvas.addEventListener('touchmove',moveDraw,{passive:false});
+canvas.addEventListener('touchend',endDrawTouch,{passive:true});
+/* BUG FIX: only reinitialise canvas on resize if student has NOT started signing yet.
+   Previously any layout shift (overlay close, keyboard) wiped the in-progress signature
+   and re-disabled the Confirm button. */
 window.addEventListener('resize',function(){
-  if(document.getElementById('sig-overlay').classList.contains('open')){initCanvas();}
+  if(document.getElementById('sig-overlay').classList.contains('open')&&!hasDrawn){initCanvas();}
 });
+function clearSig(){var dpr=window.devicePixelRatio||1;ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();hasDrawn=false;document.getElementById('btn-sig-confirm').disabled=true;}
+/* Belt-and-suspenders: direct touchend listener on Confirm button for iOS Safari */
+document.getElementById('btn-sig-confirm').addEventListener('touchend',function(e){
+  if(this.disabled)return;
+  e.preventDefault();
+  confirmSig();
+},{passive:false});
 function clearSig(){var dpr=window.devicePixelRatio||1;ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();hasDrawn=false;document.getElementById('btn-sig-confirm').disabled=true;}
 function openSigPad(source,sid){
   sigPadSource=source||'kiosk-signin';sigPadSid=sid||selSid;if(!sigPadSid)return;
