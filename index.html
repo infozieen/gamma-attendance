@@ -883,7 +883,7 @@ var PIN = '1234';
    2. GDRIVE_FOLDER_URL → your restricted shared Drive folder link
    ═══════════════════════════════════════════════════════════════════ */
 var GOOGLE_CLIENT_ID  = '985606939375-rimlr7sqkpvva5lsvj61nq85ao4qcmfo.apps.googleusercontent.com';
-var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1XwWAM38H4KKHS4hqprIWQLTqBDs0VGw5?usp=drive_link';
+var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1z9Ttm4wt-LfmcggS8ChMttLQb0d60LP5';
 var ALLOWED_DOMAIN    = 'gamma.edu.au';
 /* Extract folder ID from URL automatically */
 var GDRIVE_FOLDER_ID  = (GDRIVE_FOLDER_URL.match(/\/folders\/([^?/]+)/)||[])[1]||'';
@@ -892,6 +892,8 @@ var GDRIVE_FOLDER_ID  = (GDRIVE_FOLDER_URL.match(/\/folders\/([^?/]+)/)||[])[1]|
 var googleUser  = null;   /* {email, name, initials} */
 var accessToken = null;   /* Google Drive API access token */
 var driveFiles  = [];
+var driveFolders = [];    /* subfolder list from root folder */
+var currentDriveFolder = null;  /* {id, name} of selected subfolder, or null = root */
 var tokenClient = null;
 
 /* Called by Google Identity Services after sign-in */
@@ -998,8 +1000,9 @@ function openGDrive(){
   window.open(GDRIVE_FOLDER_URL,'_blank','noopener,noreferrer');
 }
 
-/* ─── Drive API: list xlsx files in shared folder ─── */
+/* ─── Drive API: load root — shows subfolder cards ─── */
 async function loadDriveFiles(){
+  currentDriveFolder = null;
   document.getElementById('lv-drive-loading').style.display    = 'flex';
   document.getElementById('lv-drive-cards-wrap').style.display = 'none';
   document.getElementById('lv-drive-error').style.display      = 'none';
@@ -1007,18 +1010,50 @@ async function loadDriveFiles(){
   if(!accessToken){ showDriveError('No Drive access. Please sign out and sign in again.'); return; }
   if(!GDRIVE_FOLDER_ID){ showDriveError('Drive folder ID missing.'); return; }
   try{
-    var q="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
+    /* list subfolders */
+    var qF="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+    var urlF='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qF)+'&fields=files(id,name,modifiedTime)&orderBy=name&pageSize=100';
+    var rF=await fetch(urlF,{headers:{'Authorization':'Bearer '+accessToken}});
+    var dF=await rF.json();
+    if(!rF.ok)throw new Error((dF.error&&dF.error.message)||'Drive API error '+rF.status);
+    driveFolders=dF.files||[];
+
+    /* also list xlsx files directly in root */
+    var qX="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
+    var urlX='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qX)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
+    var rX=await fetch(urlX,{headers:{'Authorization':'Bearer '+accessToken}});
+    var dX=await rX.json();
+    if(!rX.ok)throw new Error((dX.error&&dX.error.message)||'Drive API error '+rX.status);
+    driveFiles=dX.files||[];
+
+    document.getElementById('lv-drive-loading').style.display='none';
+    renderDriveBrowser(null, driveFolders, driveFiles);
+    document.getElementById('lv-drive-cards-wrap').style.display='block';
+  }catch(e){
+    document.getElementById('lv-drive-loading').style.display='none';
+    showDriveError('Could not load Drive: '+e.message);
+  }
+}
+
+/* ─── Drive API: drill into a subfolder ─── */
+async function openDriveFolder(folderId, folderName){
+  currentDriveFolder={id:folderId,name:folderName};
+  document.getElementById('lv-drive-loading').style.display    = 'flex';
+  document.getElementById('lv-drive-cards-wrap').style.display = 'none';
+  try{
+    var q="'"+folderId+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
     var url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
     var resp=await fetch(url,{headers:{'Authorization':'Bearer '+accessToken}});
     var data=await resp.json();
     if(!resp.ok)throw new Error((data.error&&data.error.message)||'Drive API error '+resp.status);
-    driveFiles=data.files||[];
+    var files=data.files||[];
     document.getElementById('lv-drive-loading').style.display='none';
-    renderDriveCards(driveFiles);
+    renderDriveBrowser({id:folderId,name:folderName}, [], files);
     document.getElementById('lv-drive-cards-wrap').style.display='block';
   }catch(e){
     document.getElementById('lv-drive-loading').style.display='none';
-    showDriveError('Could not load files: '+e.message+'. You can load a file manually below.');
+    showDriveError('Could not load folder: '+e.message);
+    document.getElementById('lv-drive-cards-wrap').style.display='block';
   }
 }
 
@@ -1027,24 +1062,57 @@ function showDriveError(msg){
   document.getElementById('lv-drive-err-msg').textContent=msg;
 }
 
-function renderDriveCards(files){
+/* ─── Render the two-level browser ─── */
+function renderDriveBrowser(folder, folders, files){
   var grid=document.getElementById('lv-drive-cards');
-  if(!files.length){grid.innerHTML='<div class="lv-empty">No .xlsx files found in the Drive folder</div>';return;}
-  grid.innerHTML=files.map(function(f){
+  var headerEl=document.querySelector('#lv-drive-cards-wrap > div');
+  /* update header label */
+  var lbl=headerEl?headerEl.querySelector('div[style*="font-size:13px"]'):null;
+  if(lbl){
+    if(folder) lbl.innerHTML='<button onclick="loadDriveFiles()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;margin-right:6px;">← Folders</button><span style="color:var(--text-w);font-weight:700;">📁 '+esc(folder.name)+'</span>';
+    else lbl.innerHTML='<span style="color:var(--text-w2);font-weight:600;">📁 Gamma Attendance — Select a Folder</span>';
+  }
+
+  var html='';
+
+  /* folder cards (only shown at root level) */
+  folders.forEach(function(f){
+    var d=new Date(f.modifiedTime);
+    var ds=d.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
+    var safeId=f.id.replace(/'/g,"\\'");
+    var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    html+='<div class="lv-card" style="border-left:3px solid var(--accent);" '+
+      'onclick="navTap(function(){openDriveFolder(\''+safeId+'\',\''+safeName+'\');})" ontouchstart="">'+
+      '<div class="lv-card-icon">📁</div>'+
+      '<div class="lv-card-name">'+esc(f.name)+'</div>'+
+      '<div class="lv-card-date">'+ds+'</div>'+
+      '<div class="lv-card-arr">›</div>'+
+    '</div>';
+  });
+
+  /* file cards */
+  files.forEach(function(f){
     var d=new Date(f.modifiedTime);
     var ds=d.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
     var ts=d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
     var name=f.name.replace(/\.xlsx$/i,'');
-    var size=f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.round(f.size/1024)+' KB';
+    var size=f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.round((f.size||0)/1024)+' KB';
+    var safeId=f.id.replace(/'/g,"\\'");
     var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return '<div class="lv-card" onclick="navTap(function(){loadDriveFile(\''+esc(f.id)+'\',\''+safeName+'\')})" ontouchstart="">'+
+    html+='<div class="lv-card" '+
+      'onclick="navTap(function(){loadDriveFile(\''+safeId+'\',\''+safeName+'\');})" ontouchstart="">'+
       '<div class="lv-card-icon">\uD83D\uDCCA</div>'+
       '<div class="lv-card-name">'+esc(name)+'</div>'+
-      '<div class="lv-card-date">'+ds+' \u00B7 '+ts+'</div>'+
-      '<div class="lv-card-size">'+size+' <span class="lv-card-edit">\u2713 Drive</span></div>'+
-      '<div class="lv-card-arr">\u2192</div>'+
+      '<div class="lv-card-date">'+ds+' · '+ts+'</div>'+
+      '<div class="lv-card-size">'+size+' <span class="lv-card-edit">✓ Drive</span></div>'+
+      '<div class="lv-card-arr">→</div>'+
     '</div>';
-  }).join('');
+  });
+
+  if(!folders.length&&!files.length){
+    html='<div class="lv-empty">'+(folder?'No .xlsx files found in this folder':'No folders or files found in Drive')+'</div>';
+  }
+  grid.innerHTML=html;
 }
 
 /* ─── Drive API: download selected file directly into the app ─── */
