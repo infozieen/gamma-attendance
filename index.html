@@ -244,7 +244,7 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-w);font-
 .btn-sig-clear{flex:0 0 auto;padding:12px 20px;border-radius:var(--radius-sm);border:1.5px solid var(--border-w2);background:transparent;color:var(--text-w2);font-family:var(--font);font-size:14px;cursor:pointer;}
 .btn-sig-confirm{flex:1;padding:12px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:var(--font);font-size:15px;font-weight:600;color:#fff;cursor:pointer;transition:all .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .btn-sig-confirm:hover{background:#16a34a;}
-.btn-sig-confirm:disabled{opacity:.35;cursor:not-allowed;pointer-events:none;}
+.btn-sig-confirm:disabled{opacity:.35;cursor:not-allowed;}
 
 /* ═══ SUCCESS FLASH ═══ */
 .success-flash{display:none;position:fixed;inset:0;z-index:300;align-items:center;justify-content:center;background:rgba(34,197,94,.1);backdrop-filter:blur(3px);}
@@ -590,35 +590,56 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
     </div>
   </div>
 
-  <!-- Drive-only body -->
+  <!-- Drive-integrated body -->
   <div class="lv-drive-body" id="lv-drive-body">
-    <div class="lv-welcome">Welcome, <strong id="lv-user-name">Trainer</strong></div>
-    <div class="lv-prompt-icon" style="margin:18px 0 10px;font-size:48px;">📊</div>
-    <div class="lv-prompt-title" style="margin-bottom:8px;">Open your attendance file</div>
-    <div class="lv-prompt-sub" style="margin-bottom:28px;">Go to the shared Google Drive folder, download the class Excel file, then load it below.</div>
+    <div class="lv-welcome" style="margin-bottom:16px;">Welcome, <strong id="lv-user-name">Trainer</strong></div>
 
-    <button class="btn-drive-main" onclick="openGDrive()">
-      <svg width="22" height="22" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
-        <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
-        <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
-        <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
-        <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
-        <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
-        <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
-      </svg>
-      Open Google Drive Folder
-    </button>
-
-    <div class="lv-step2">
-      <div class="lv-step2-lbl">↓ After downloading, load your file here</div>
-      <button class="btn-load-file" onclick="document.getElementById('file-single').click()">
-        📂 Load Excel File (.xlsx)
-      </button>
-      <input type="file" id="file-single" accept=".xlsx" style="display:none" onchange="loadSingleFile(this)">
+    <!-- Loading state -->
+    <div id="lv-drive-loading" style="display:none;flex-direction:column;align-items:center;gap:14px;padding:40px 0;">
+      <div style="font-size:42px;">⏳</div>
+      <div style="font-size:14px;color:var(--text-w2);">Loading files from Google Drive…</div>
     </div>
 
-    <div id="fo-error" style="margin-top:18px;"></div>
-    <div id="lv-status" style="margin-top:10px;"></div>
+    <!-- Drive file cards -->
+    <div id="lv-drive-cards-wrap" style="display:none;width:100%;max-width:840px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+        <div style="font-size:13px;font-weight:600;color:var(--text-w2);">📁 Gamma Attendance — Drive Files</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn-gdrive-sm" onclick="loadDriveFiles()" title="Refresh list">🔄 Refresh</button>
+          <button class="btn-gdrive-sm" onclick="openGDrive()" title="Open Drive folder">
+            <svg width="12" height="12" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+              <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+              <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+              <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+              <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+              <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+              <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+            </svg>
+            Open in Drive
+          </button>
+        </div>
+      </div>
+      <div class="lv-cards" id="lv-drive-cards"></div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border-w);text-align:center;">
+        <button class="btn-load-file" onclick="document.getElementById('file-single').click()" style="font-size:12px;padding:10px 22px;min-height:40px;">
+          📂 Load file manually
+        </button>
+      </div>
+    </div>
+
+    <!-- Drive error / fallback -->
+    <div id="lv-drive-error" style="display:none;flex-direction:column;align-items:center;gap:14px;padding:30px 0;text-align:center;">
+      <div style="font-size:36px;">⚠️</div>
+      <div id="lv-drive-err-msg" style="font-size:13px;color:#f87171;max-width:340px;line-height:1.6;"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+        <button class="btn-load-file" onclick="document.getElementById('file-single').click()" style="font-size:13px;padding:11px 24px;">📂 Load file manually</button>
+        <button class="btn-gdrive-sm" onclick="openGDrive()" style="min-height:44px;">Open in Drive</button>
+      </div>
+    </div>
+
+    <input type="file" id="file-single" accept=".xlsx" style="display:none" onchange="loadSingleFile(this)">
+    <div id="fo-error" style="margin-top:14px;"></div>
+    <div id="lv-status" style="margin-top:8px;"></div>
   </div>
 </div>
 
@@ -864,9 +885,14 @@ var PIN = '1234';
 var GOOGLE_CLIENT_ID  = '985606939375-rimlr7sqkpvva5lsvj61nq85ao4qcmfo.apps.googleusercontent.com';
 var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1XwWAM38H4KKHS4hqprIWQLTqBDs0VGw5?usp=drive_link';
 var ALLOWED_DOMAIN    = 'gamma.edu.au';
+/* Extract folder ID from URL automatically */
+var GDRIVE_FOLDER_ID  = (GDRIVE_FOLDER_URL.match(/\/folders\/([^?/]+)/)||[])[1]||'';
 
-/* ─── Auth state ─── */
-var googleUser = null;   /* {email, name, initials} */
+/* ─── Auth + Drive state ─── */
+var googleUser  = null;   /* {email, name, initials} */
+var accessToken = null;   /* Google Drive API access token */
+var driveFiles  = [];
+var tokenClient = null;
 
 /* Called by Google Identity Services after sign-in */
 function handleCredentialResponse(response){
@@ -878,7 +904,6 @@ function handleCredentialResponse(response){
   var domain = email.split('@')[1]||'';
   if(domain.toLowerCase() !== ALLOWED_DOMAIN){
     showAgError('Access denied. Only @'+ALLOWED_DOMAIN+' accounts are permitted. You signed in as: '+email);
-    /* Revoke the token so they can try another account */
     if(window.google && google.accounts) google.accounts.id.revoke(payload.sub||email, function(){});
     return;
   }
@@ -889,6 +914,11 @@ function handleCredentialResponse(response){
   };
   hideAgError();
   showApp();
+  /* Request Drive API access token — prompt:'' means auto-approve if already consented */
+  setTimeout(function(){
+    if(tokenClient){ tokenClient.requestAccessToken({prompt:''}); }
+    else { showDriveError('Drive API not ready. Please refresh the page.'); }
+  }, 400);
 }
 
 function showAgError(msg){
@@ -901,27 +931,27 @@ function hideAgError(){
 }
 
 function showApp(){
-  /* Populate user pill */
-  document.getElementById('lv-user-av').textContent   = googleUser.initials;
-  document.getElementById('lv-user-email').textContent = googleUser.email;
-  document.getElementById('lv-user-name').textContent  = googleUser.name.split(' ')[0];
-  /* Hide auth gate, show landing */
-  document.getElementById('auth-gate').style.display='none';
+  document.getElementById('lv-user-av').textContent    = googleUser.initials;
+  document.getElementById('lv-user-email').textContent  = googleUser.email;
+  document.getElementById('lv-user-name').textContent   = googleUser.name.split(' ')[0];
+  document.getElementById('auth-gate').style.display    = 'none';
   document.getElementById('landing-view').classList.add('active');
+  /* Show loading spinner while Drive files load */
+  document.getElementById('lv-drive-loading').style.display    = 'flex';
+  document.getElementById('lv-drive-cards-wrap').style.display = 'none';
+  document.getElementById('lv-drive-error').style.display      = 'none';
 }
 
 function signOutGoogle(){
   if(!confirm('Sign out of Gamma Attendance?'))return;
-  googleUser=null;
+  googleUser=null; accessToken=null; driveFiles=[];
   workbook=null;origBytes=null;pendingWrites={};students=[];sessions={};
   document.getElementById('landing-view').classList.remove('active');
   document.getElementById('kiosk-view').classList.remove('active');
   document.getElementById('admin-view').classList.remove('active');
   document.getElementById('admin-fab').style.display='none';
-  /* Re-show auth gate */
   var gate=document.getElementById('auth-gate');
   gate.style.display='flex';
-  /* Re-render the Google button */
   if(window.google && google.accounts && google.accounts.id){
     google.accounts.id.renderButton(document.getElementById('g-signin-btn'),
       {theme:'filled_black',size:'large',text:'signin_with',shape:'rectangular',width:280});
@@ -929,9 +959,10 @@ function signOutGoogle(){
   }
 }
 
-/* Initialise GIS once the library loads */
+/* Initialise GIS + Drive token client once the library loads */
 function initGoogleAuth(){
   if(!window.google || !google.accounts){ setTimeout(initGoogleAuth,200); return; }
+  /* 1 — Sign-in (ID token → domain check) */
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleCredentialResponse,
@@ -942,20 +973,99 @@ function initGoogleAuth(){
     document.getElementById('g-signin-btn'),
     {theme:'filled_black',size:'large',text:'signin_with',shape:'rectangular',width:280}
   );
-  google.accounts.id.prompt();   /* show One Tap if the browser supports it */
+  google.accounts.id.prompt();
+  /* 2 — Token client for Drive API (drive.readonly scope) */
+  if(google.accounts.oauth2){
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      callback: function(tokenResponse){
+        if(tokenResponse.error){
+          document.getElementById('lv-drive-loading').style.display='none';
+          showDriveError('Drive access denied: '+tokenResponse.error+'. You can still load files manually.');
+          return;
+        }
+        accessToken = tokenResponse.access_token;
+        loadDriveFiles();
+      }
+    });
+  }
 }
 window.addEventListener('load', initGoogleAuth);
 
-/* ─── Google Drive opener ─── */
+/* ─── Google Drive opener (fallback) ─── */
 function openGDrive(){
-  if(!GDRIVE_FOLDER_URL||GDRIVE_FOLDER_URL==='YOUR_GOOGLE_DRIVE_FOLDER_URL'){
-    alert('Google Drive folder URL not configured.\nEdit the GDRIVE_FOLDER_URL constant at the top of the script.');
-    return;
-  }
   window.open(GDRIVE_FOLDER_URL,'_blank','noopener,noreferrer');
 }
 
-/* ─── Single-file loader (replaces folder picker) ─── */
+/* ─── Drive API: list xlsx files in shared folder ─── */
+async function loadDriveFiles(){
+  document.getElementById('lv-drive-loading').style.display    = 'flex';
+  document.getElementById('lv-drive-cards-wrap').style.display = 'none';
+  document.getElementById('lv-drive-error').style.display      = 'none';
+  showLvError(''); showLvStatus('');
+  if(!accessToken){ showDriveError('No Drive access. Please sign out and sign in again.'); return; }
+  if(!GDRIVE_FOLDER_ID){ showDriveError('Drive folder ID missing.'); return; }
+  try{
+    var q="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
+    var url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
+    var resp=await fetch(url,{headers:{'Authorization':'Bearer '+accessToken}});
+    var data=await resp.json();
+    if(!resp.ok)throw new Error((data.error&&data.error.message)||'Drive API error '+resp.status);
+    driveFiles=data.files||[];
+    document.getElementById('lv-drive-loading').style.display='none';
+    renderDriveCards(driveFiles);
+    document.getElementById('lv-drive-cards-wrap').style.display='block';
+  }catch(e){
+    document.getElementById('lv-drive-loading').style.display='none';
+    showDriveError('Could not load files: '+e.message+'. You can load a file manually below.');
+  }
+}
+
+function showDriveError(msg){
+  document.getElementById('lv-drive-error').style.display='flex';
+  document.getElementById('lv-drive-err-msg').textContent=msg;
+}
+
+function renderDriveCards(files){
+  var grid=document.getElementById('lv-drive-cards');
+  if(!files.length){grid.innerHTML='<div class="lv-empty">No .xlsx files found in the Drive folder</div>';return;}
+  grid.innerHTML=files.map(function(f){
+    var d=new Date(f.modifiedTime);
+    var ds=d.toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'});
+    var ts=d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
+    var name=f.name.replace(/\.xlsx$/i,'');
+    var size=f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.round(f.size/1024)+' KB';
+    var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div class="lv-card" onclick="navTap(function(){loadDriveFile(\''+esc(f.id)+'\',\''+safeName+'\')})" ontouchstart="">'+
+      '<div class="lv-card-icon">\uD83D\uDCCA</div>'+
+      '<div class="lv-card-name">'+esc(name)+'</div>'+
+      '<div class="lv-card-date">'+ds+' \u00B7 '+ts+'</div>'+
+      '<div class="lv-card-size">'+size+' <span class="lv-card-edit">\u2713 Drive</span></div>'+
+      '<div class="lv-card-arr">\u2192</div>'+
+    '</div>';
+  }).join('');
+}
+
+/* ─── Drive API: download selected file directly into the app ─── */
+async function loadDriveFile(fileId, fileName){
+  showLvStatus('Downloading '+fileName+'\u2026'); showLvError('');
+  try{
+    var resp=await fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media',
+      {headers:{'Authorization':'Bearer '+accessToken}});
+    if(!resp.ok)throw new Error('Download failed (HTTP '+resp.status+')');
+    var buf=await resp.arrayBuffer();
+    currentFileName=fileName; fileHandle=null; origBytes=buf; pendingWrites={};
+    var u8=new Uint8Array(buf);
+    try{workbook=XLSX.read(u8,{type:'array',cellStyles:true,cellNF:true});}
+    catch(e2){workbook=XLSX.read(u8,{type:'array'});}
+    showLvStatus(''); showSheetSelector();
+  }catch(e){
+    showLvStatus(''); showLvError('Download failed: '+e.message);
+  }
+}
+
+/* ─── Single-file loader fallback ─── */
 function loadSingleFile(input){
   var files=Array.from(input.files||[]);
   if(!files.length)return;
@@ -1936,13 +2046,13 @@ window.addEventListener('resize',function(){
   if(document.getElementById('sig-overlay').classList.contains('open')&&!hasDrawn){initCanvas();}
 });
 function clearSig(){var dpr=window.devicePixelRatio||1;ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();hasDrawn=false;document.getElementById('btn-sig-confirm').disabled=true;}
-/* Belt-and-suspenders: direct touchend listener on Confirm button for iOS Safari */
+/* Belt-and-suspenders: direct touchend on Confirm for iOS Safari.
+   NOTE: pointer-events must NOT be 'none' on the disabled button or this never fires. */
 document.getElementById('btn-sig-confirm').addEventListener('touchend',function(e){
-  if(this.disabled)return;
+  if(!hasDrawn||!sigPadSid)return;   /* guard instead of pointer-events:none */
   e.preventDefault();
   confirmSig();
 },{passive:false});
-function clearSig(){var dpr=window.devicePixelRatio||1;ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();hasDrawn=false;document.getElementById('btn-sig-confirm').disabled=true;}
 function openSigPad(source,sid){
   sigPadSource=source||'kiosk-signin';sigPadSid=sid||selSid;if(!sigPadSid)return;
   var s=students.find(function(x){return x.id===sigPadSid;});
