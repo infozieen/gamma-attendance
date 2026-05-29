@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gamma Education — Attendance</title>
+
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" onerror="this.remove()">
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
@@ -262,7 +263,7 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-w);font-
 
 /* ═══ END CLASS ═══ */
 function openEndClass(){
-  if(!workbook||!students.length)return;
+  if((!workbook&&!spreadsheetId)||!students.length)return;
   _lastTap=0;
   ecRefresh();
   document.getElementById('ec-pin').value='';
@@ -320,7 +321,27 @@ function ecBulkSignOut(){
   refreshKiosk();
 }
 
-function ecConfirmPin(){
+/* \u2500\u2500\u2500 Drive multipart upload (requires drive.file scope) \u2500\u2500\u2500 */
+async function uploadFileToDrive(blob,filename){
+  if(!accessToken){console.warn('No Drive token \u2014 cannot upload '+filename);return null;}
+  var folderId=currentDriveFolder?currentDriveFolder.id:GDRIVE_FOLDER_ID;
+  var mimeType=blob.type||'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  var meta=JSON.stringify({name:filename,parents:[folderId]});
+  var boundary='===GammaUpload===';
+  var head='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+meta+'\r\n--'+boundary+'\r\nContent-Type: '+mimeType+'\r\n\r\n';
+  var tail='\r\n--'+boundary+'--';
+  var hB=new TextEncoder().encode(head),tB=new TextEncoder().encode(tail);
+  var fB=new Uint8Array(await blob.arrayBuffer());
+  var combined=new Uint8Array(hB.length+fB.length+tB.length);
+  combined.set(hB,0);combined.set(fB,hB.length);combined.set(tB,hB.length+fB.length);
+  var resp=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+    method:'POST',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'multipart/related; boundary='+boundary},body:combined});
+  if(!resp.ok){var err=await resp.json().catch(function(){return{};});throw new Error((err.error&&err.error.message)||'HTTP '+resp.status);}
+  return await resp.json();
+}
+function todayISO(){var d=new Date();return d.getFullYear()+'-'+(String(d.getMonth()+1).padStart(2,'0'))+'-'+(String(d.getDate()).padStart(2,'0'));}
+
+async function ecConfirmPin(){
   var pin=document.getElementById('ec-pin').value;
   if(pin!==PIN){
     document.getElementById('ec-pin-err').textContent='Incorrect PIN. Try again.';
@@ -329,21 +350,35 @@ function ecConfirmPin(){
     return;
   }
   document.getElementById('ec-pin-err').textContent='';
-  /* End Class: save the file. saveWorkbook() handles download + update of origBytes. */
-  saveWorkbook(false);
-  /* Transition to done state */
+  var ds=todayISO();
+  var baseClass=(ci.classCode||'Class').replace(/[^A-Za-z0-9_-]/g,'_');
+  var origBase=(currentFileName||((selSheet||'attendance')+'.xlsx')).replace(/\.xlsx$/i,'');
+  var xlsFn=origBase+'_'+ds+'.xlsx';
+  var rptFn='Gamma_Attendance_'+baseClass+'_'+ds+'.xlsx';
+  if(!useGoogleSheets){
+    showToast('\u23f3 Saving & uploading to Drive\u2026',12000);
+    var xlsBlob=null,rptBlob=null,xlsOK=false,rptOK=false;
+    try{
+      xlsBlob=await saveWorkbook(true);
+      if(xlsBlob){triggerDownload(xlsBlob,xlsFn);try{await uploadFileToDrive(xlsBlob,xlsFn);xlsOK=true;}catch(eu){console.warn('Drive xlsx:',eu);}}
+    }catch(e){console.error('saveWorkbook End Class:',e);}
+    try{
+      rptBlob=await exportFormattedExcel();
+      if(rptBlob){triggerDownload(rptBlob,rptFn);try{await uploadFileToDrive(rptBlob,rptFn);rptOK=true;}catch(eu){console.warn('Drive report:',eu);}}
+    }catch(e){console.warn('Report End Class:',e);}
+    var parts=[xlsOK?'Updated Excel':null,rptOK?'Attendance Report':null].filter(Boolean);
+    showToast(parts.length?'\u2601 Uploaded to Drive: '+parts.join(' & ')+' \u2014 also downloaded locally':'\u26a0 Drive upload failed \u2014 files downloaded locally',5500);
+  }else{showToast('\u2713 All attendance saved to Google Sheets');}
   var noOutCount=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;}).length;
   var inCount=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn;}).length;
   document.getElementById('ec-done-sub').textContent=
-    inCount+' student'+(inCount!==1?'s':'')+' attended · '+
-    (inCount-noOutCount)+' signed out · '+
+    inCount+' student'+(inCount!==1?'s':'')+' attended \u00b7 '+
+    (inCount-noOutCount)+' signed out \u00b7 '+
     (noOutCount>0?noOutCount+' left without signing out':'all signed out');
   document.getElementById('ec-active').style.display='none';
   document.getElementById('ec-done').style.display='';
-  /* Remove the beforeunload guard so tab can close cleanly */
   window.removeEventListener('beforeunload',beforeUnloadHandler);
 }
-
 function ecCloseTab(){
   /* window.close() only works on tabs opened via script.
      For user-opened tabs, redirect to blank page instead. */
@@ -367,15 +402,18 @@ document.getElementById('ec-pin').addEventListener('keydown',function(e){
   if(e.key==='Enter')ecConfirmPin();
 });
 
-/* ═══ BEFOREUNLOAD: warn if active session has unsigned-out students ═══ */
+/* ═══ BEFOREUNLOAD: warn if unsigned-out students OR unsaved pending writes ═══ */
 function beforeUnloadHandler(e){
-  if(!workbook||!students.length)return;
+  if((!workbook&&!spreadsheetId)||!students.length)return;
   var noOut=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;});
-  if(!noOut.length)return;
+  var hasPending=pendingWrites&&Object.keys(pendingWrites).length>0;
+  if(!noOut.length&&!hasPending)return;
   e.preventDefault();
-  /* Modern browsers show their own generic message; this string is ignored */
-  e.returnValue=noOut.length+' student(s) have not signed out. Use "End Class" before closing.';
-  return e.returnValue;
+  var msg='';
+  if(noOut.length)msg+=noOut.length+' student(s) have not signed out. ';
+  if(hasPending)msg+='Unsaved attendance changes. ';
+  msg+='Please use “End Class” before closing.';
+  e.returnValue=msg;return e.returnValue;
 }
 window.addEventListener('beforeunload',beforeUnloadHandler);
 
@@ -603,7 +641,7 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
     <!-- Drive file cards -->
     <div id="lv-drive-cards-wrap" style="display:none;width:100%;max-width:840px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-        <div style="font-size:13px;font-weight:600;color:var(--text-w2);">📁 Gamma Attendance — Drive Files</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text-w2);" id="lv-drive-header-lbl">📁 Gamma Attendance — Select a Folder</div>
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="btn-gdrive-sm" onclick="loadDriveFiles()" title="Refresh list">🔄 Refresh</button>
           <button class="btn-gdrive-sm" onclick="openGDrive()" title="Open Drive folder">
@@ -618,6 +656,15 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
             Open in Drive
           </button>
         </div>
+      </div>
+      <!-- Google Sheet URL paste bar -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;">
+        <input id="gs-url-input" type="text" placeholder="Or paste a Google Sheet URL here…"
+          style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border-w);background:var(--bg-card);color:var(--text-w);font-size:12px;outline:none;"
+          onkeydown="if(event.key==='Enter')loadFromGSUrl()"/>
+        <button class="btn-gdrive-sm" onclick="loadFromGSUrl()" style="min-height:38px;padding:0 16px;white-space:nowrap;">
+          📊 Open Sheet
+        </button>
       </div>
       <div class="lv-cards" id="lv-drive-cards"></div>
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border-w);text-align:center;">
@@ -883,7 +930,7 @@ var PIN = '1234';
    2. GDRIVE_FOLDER_URL → your restricted shared Drive folder link
    ═══════════════════════════════════════════════════════════════════ */
 var GOOGLE_CLIENT_ID  = '985606939375-rimlr7sqkpvva5lsvj61nq85ao4qcmfo.apps.googleusercontent.com';
-var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1z9Ttm4wt-LfmcggS8ChMttLQb0d60LP5';
+var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1XwWAM38H4KKHS4hqprIWQLTqBDs0VGw5?usp=drive_link';
 var ALLOWED_DOMAIN    = 'gamma.edu.au';
 /* Extract folder ID from URL automatically */
 var GDRIVE_FOLDER_ID  = (GDRIVE_FOLDER_URL.match(/\/folders\/([^?/]+)/)||[])[1]||'';
@@ -976,11 +1023,11 @@ function initGoogleAuth(){
     {theme:'filled_black',size:'large',text:'signin_with',shape:'rectangular',width:280}
   );
   google.accounts.id.prompt();
-  /* 2 — Token client for Drive API (drive.readonly scope) */
+  /* 2 — Token client for Drive API (drive.file scope allows reading + uploading) */
   if(google.accounts.oauth2){
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
       callback: function(tokenResponse){
         if(tokenResponse.error){
           document.getElementById('lv-drive-loading').style.display='none';
@@ -998,6 +1045,22 @@ window.addEventListener('load', initGoogleAuth);
 /* ─── Google Drive opener (fallback) ─── */
 function openGDrive(){
   window.open(GDRIVE_FOLDER_URL,'_blank','noopener,noreferrer');
+}
+
+/* ─── Direct Google Sheet URL paste → load without Drive browser ─── */
+function loadFromGSUrl(){
+  var url=(document.getElementById('gs-url-input').value||'').trim();
+  if(!url){showLvError('Please paste a Google Sheets URL.');return;}
+  var m=url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if(!m){showLvError('That doesn\'t look like a Google Sheets URL. Copy it from the browser address bar.');return;}
+  var ssId=m[1];
+  var fileName=url.split('/').pop()||'Google Sheet';
+  document.getElementById('gs-url-input').value='';
+  showLvError('');
+  if(!accessToken){
+    showLvError('Please sign in with Google first.');return;
+  }
+  loadDriveFile(ssId,fileName);
 }
 
 /* ─── Drive API: load root — shows subfolder cards ─── */
@@ -1019,7 +1082,7 @@ async function loadDriveFiles(){
     driveFolders=dF.files||[];
 
     /* also list xlsx files directly in root */
-    var qX="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
+    var qX="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
     var urlX='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qX)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
     var rX=await fetch(urlX,{headers:{'Authorization':'Bearer '+accessToken}});
     var dX=await rX.json();
@@ -1041,7 +1104,7 @@ async function openDriveFolder(folderId, folderName){
   document.getElementById('lv-drive-loading').style.display    = 'flex';
   document.getElementById('lv-drive-cards-wrap').style.display = 'none';
   try{
-    var q="'"+folderId+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
+    var q="'"+folderId+"' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
     var url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
     var resp=await fetch(url,{headers:{'Authorization':'Bearer '+accessToken}});
     var data=await resp.json();
@@ -1070,7 +1133,7 @@ function renderDriveBrowser(folder, folders, files){
   var lbl=headerEl?headerEl.querySelector('div[style*="font-size:13px"]'):null;
   if(lbl){
     if(folder) lbl.innerHTML='<button onclick="loadDriveFiles()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;margin-right:6px;">← Folders</button><span style="color:var(--text-w);font-weight:700;">📁 '+esc(folder.name)+'</span>';
-    else lbl.innerHTML='<span style="color:var(--text-w2);font-weight:600;">📁 Gamma Attendance — Select a Folder</span>';
+    else lbl.innerHTML='<span style="color:var(--text-w2);font-weight:600;">📊 Select a Google Sheet to open</span>';
   }
 
   var html='';
@@ -1110,26 +1173,46 @@ function renderDriveBrowser(folder, folders, files){
   });
 
   if(!folders.length&&!files.length){
-    html='<div class="lv-empty">'+(folder?'No .xlsx files found in this folder':'No folders or files found in Drive')+'</div>';
+    html='<div class="lv-empty">'+(folder?'No Google Sheets found in this folder':'No folders or Google Sheets found in Drive')+'</div>';
   }
   grid.innerHTML=html;
 }
 
-/* ─── Drive API: download selected file directly into the app ─── */
+/* ─── Google Sheets: open a spreadsheet from Drive (file ID = spreadsheet ID) ─── */
 async function loadDriveFile(fileId, fileName){
-  showLvStatus('Downloading '+fileName+'\u2026'); showLvError('');
+  showLvStatus('Opening '+fileName+'…'); showLvError('');
+  spreadsheetId=fileId; currentFileName=fileName; useGoogleSheets=true;
+  workbook=null; origBytes=null; pendingWrites={}; fileHandle=null;
   try{
-    var resp=await fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media',
+    /* 1 — Fetch spreadsheet metadata (sheet tab names) */
+    var r1=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+fileId+'?fields=sheets.properties',
       {headers:{'Authorization':'Bearer '+accessToken}});
-    if(!resp.ok)throw new Error('Download failed (HTTP '+resp.status+')');
-    var buf=await resp.arrayBuffer();
-    currentFileName=fileName; fileHandle=null; origBytes=buf; pendingWrites={};
-    var u8=new Uint8Array(buf);
-    try{workbook=XLSX.read(u8,{type:'array',cellStyles:true,cellNF:true});}
-    catch(e2){workbook=XLSX.read(u8,{type:'array'});}
-    showLvStatus(''); showSheetSelector();
+    var d1=await r1.json();
+    if(!r1.ok)throw new Error((d1.error&&d1.error.message)||'Sheets API error '+r1.status);
+    var allNames=(d1.sheets||[]).map(function(s){return s.properties.title;});
+    var names=allNames.filter(function(n){return !/^summary$/i.test(n);});
+    if(!names.length){showLvStatus('');showLvError('No class sheets found in this spreadsheet.');return;}
+
+    /* 2 — Batch-fetch D4 from each sheet to display dates on selector buttons */
+    var qRanges=names.map(function(n){return 'ranges='+encodeURIComponent("'"+n+"'!D4");}).join('&');
+    var r2=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+fileId+'/values:batchGet?'+qRanges+'&valueRenderOption=UNFORMATTED_VALUE',
+      {headers:{'Authorization':'Bearer '+accessToken}});
+    var d2=await r2.json();
+    var dates=(d2.valueRanges||[]).map(function(vr){
+      var v=vr.values&&vr.values[0]&&vr.values[0][0];
+      if(!v)return '';
+      if(typeof v==='number'&&v>40000&&v<60000){
+        var dt=new Date(Math.round((v-25569)*86400*1000));
+        return dt.toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});
+      }
+      return String(v);
+    });
+
+    showLvStatus('');
+    showSheetSelectorGS(names,dates);
   }catch(e){
-    showLvStatus(''); showLvError('Download failed: '+e.message);
+    showLvStatus(''); showLvError('Could not open spreadsheet: '+e.message);
+    spreadsheetId=null; useGoogleSheets=false;
   }
 }
 
@@ -1174,12 +1257,15 @@ var C = {
 var fileHandle=null, dirHandle=null, workbook=null, selSheet=null, students=[], ci={}, sessions={};
 var sigPadSource=null, sigPadSid=null, confTimer=null, selSid=null, saveTimer=null, hasDrawn=false;
 var kTab='in', searchTimer=null, _lastTap=0, landingFiles=[];
+/* Google Sheets state */
+var spreadsheetId=null;   /* current Google Sheet ID (=Drive file ID for Sheets)  */
+var sheetData=[];         /* 2D array from Sheets API values endpoint              */
+var useGoogleSheets=false;/* true when loaded from Google Sheets (not local xlsx)  */
 var origBytes=null;        /* raw ArrayBuffer of the original xlsx file           */
 var pendingWrites={};      /* {addr:{v,t}} — cells to write on next save          */
 var currentFileName='';   /* original filename for download                       */
 
 function ls(k,v){if(v===undefined){try{return JSON.parse(localStorage.getItem('gamma_'+k));}catch(e){return null;}}localStorage.setItem('gamma_'+k,JSON.stringify(v));}
-function todayISO(){return new Date().toISOString().slice(0,10);}
 function nowHHMM(){return new Date().toTimeString().slice(0,5);}
 function nowHHMMSS(){return new Date().toTimeString().slice(0,8);}
 function dateLong(){return new Date().toLocaleDateString('en-AU',{weekday:'long',year:'numeric',month:'long',day:'numeric'});}
@@ -1329,6 +1415,7 @@ function _parseFileBytes(file){
 
 
 /* ═══ SHEET SELECTOR ═══ */
+/* ── Sheet selector: xlsx workbook version (local files) ── */
 function showSheetSelector(){
   var valid=workbook.SheetNames.filter(function(s){return /\d{2}\.\d{2}\.\d{4}/.test(s);});
   if(!valid.length){showLvError('No date sheets found (names must be DD.MM.YYYY). Found: '+workbook.SheetNames.join(', '));return;}
@@ -1339,18 +1426,147 @@ function showSheetSelector(){
   }).join('');
   document.getElementById('sheet-overlay').classList.add('open');
 }
+
+/* ── Sheet selector: Google Sheets version ── */
+function showSheetSelectorGS(names,dates){
+  document.getElementById('sheet-list').innerHTML=names.map(function(n,i){
+    var d=dates[i]||'';
+    var label=d?'Week of '+d:'Sheet: '+esc(n);
+    return '<button class="sheet-btn" onclick="navTap(function(){selectSheet(\''+n.replace(/\\/g,'\\\\').replace(/'/g,'\\\'')+'\')})" ><div class="sheet-btn-left"><span class="sheet-date">'+esc(n)+'</span><span class="sheet-label">'+esc(label)+'</span></div><span class="sheet-arr">\u2192</span></button>';
+  }).join('');
+  document.getElementById('sheet-overlay').classList.add('open');
+}
+
 function cancelSheet(){
   document.getElementById('sheet-overlay').classList.remove('open');
-  workbook=null;fileHandle=null;origBytes=null;pendingWrites={};showLvStatus('');
+  workbook=null;fileHandle=null;origBytes=null;pendingWrites={};
+  spreadsheetId=null;sheetData=[];useGoogleSheets=false;
+  showLvStatus('');
 }
+
 function selectSheet(name){
-  _lastTap=0;selSheet=name;pendingWrites={}; /* clear writes for new sheet */
+  _lastTap=0; selSheet=name; pendingWrites={};
   document.getElementById('sheet-overlay').classList.remove('open');
-  try{parseSheet(name);}catch(e){showLvError('Parse failed: '+e.message);return;}
-  document.getElementById('landing-view').classList.remove('active');
+  if(useGoogleSheets){
+    loadSheetData(name);   /* async — fetches from Sheets API then enters kiosk */
+  } else {
+    try{parseSheet(name);}catch(e){showLvError('Parse failed: '+e.message);return;}
+    _enterKioskView();
+  }
+}
+
+/* ── Fetch a Google Sheet tab's data and enter kiosk ── */
+async function loadSheetData(name){
+  document.getElementById('landing-view').classList.add('loading');
+  showLvStatus('Loading sheet…');
+  try{
+    var range=encodeURIComponent("'"+name+"'!A:T");
+    var resp=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'/values/'+range+'?valueRenderOption=UNFORMATTED_VALUE',
+      {headers:{'Authorization':'Bearer '+accessToken}});
+    var data=await resp.json();
+    if(!resp.ok)throw new Error((data.error&&data.error.message)||'Error '+resp.status);
+    sheetData=data.values||[];
+    showLvStatus('');
+    parseSheetGS(name);
+    _enterKioskView();
+  }catch(e){
+    showLvStatus('');showLvError('Sheet load failed: '+e.message);
+    document.getElementById('landing-view').classList.remove('loading');
+  }
+}
+
+/* ── Parse 2-D array from Sheets API into ci + students ── */
+function parseSheetGS(name){
+  var data=sheetData;
+  function g(ri,ci2){var row=data[ri];return(row&&row[ci2]!=null)?row[ci2]:'';}
+  /* Class info from header rows */
+  ci={classCode:String(g(0,0)).replace('Class Roll - ','').trim(),
+      trainer:String(g(1,3)||g(1,4)||'').trim(),
+      qualification:String(g(2,3)||g(2,4)||'').trim(),
+      date:String(g(3,3)||g(3,4)||'').trim()};
+  sessions=ls('sess_'+name)||{};
+  students=[];
+  var tInit=(ci.trainer||'').trim().charAt(0).toUpperCase()||'T';
+  var sessChanged=false;
+
+  for(var i=0;i<data.length;i++){
+    var row=data[i];
+    if(!row||!row[0])continue;
+    var sid=String(row[0]).trim();
+    if(!/^GM-/.test(sid))continue;
+    function gv(ci2){return(row[ci2]!=null)?row[ci2]:'';}
+    var s={id:sid,name:String(gv(1)||'').trim(),email:String(gv(2)||'').trim(),
+           variation:String(gv(3)||'').trim(),rowIdx:i,
+           friAtt:gv(C.friAtt),   friInit:String(gv(C.friInit)||''),
+           wedHrs:gv(C.wedHrs),   wedInit:String(gv(C.wedInit)||''),
+           thuHrs:gv(C.thuHrs),   thuInit:String(gv(C.thuInit)||''),
+           catHrs:gv(C.catHrs),   catInit:String(gv(C.catInit)||''),
+           offHrs:gv(C.offHrs),   offInit:String(gv(C.offInit)||''),
+           supHrs:gv(C.supHrs),   supInit:String(gv(C.supInit)||''),
+           stdSig:String(gv(C.stdSig)||''),
+           trainerVerif:String(gv(C.trainerVerif)||''),
+           notes:String(gv(C.notes)||'')};
+    students.push(s);
+
+    var hasHours =parseFloat(gv(C.friAtt)||0)>0;
+    var hasVerif =String(gv(C.trainerVerif)||'').trim().length>0;
+    var hasSig   =String(gv(C.stdSig)||'').trim().length>0;
+    if((hasHours||hasVerif||hasSig)&&!sessions[sid]){sessions[sid]={signIn:'prior',restored:true};sessChanged=true;}
+
+    /* Auto-fill blanks for already-signed-in students */
+    var sess=sessions[sid];
+    if(sess&&sess.signIn&&!hasHours){
+      s.friAtt=7.5;s.friInit=tInit;s.wedHrs=5;s.wedInit=tInit;s.offHrs=6;s.offInit=tInit;s.trainerVerif=ci.trainer||'';
+      batchWriteToSheet([
+        {row:i,col:C.friAtt,value:7.5},{row:i,col:C.friInit,value:tInit},
+        {row:i,col:C.wedHrs,value:5},{row:i,col:C.wedInit,value:tInit},
+        {row:i,col:C.offHrs,value:6},{row:i,col:C.offInit,value:tInit},
+        {row:i,col:C.trainerVerif,value:ci.trainer||''}
+      ]);
+    }
+  }
+  if(sessChanged)ls('sess_'+name,sessions);
+}
+
+/* ── Helper: enter kiosk view (shared by xlsx + GS paths) ── */
+function _enterKioskView(){
+  document.getElementById('landing-view').classList.remove('active','loading');
   document.getElementById('kiosk-view').classList.add('active');
   document.getElementById('admin-fab').style.display='flex';
   initAdminHeader();initKiosk();
+}
+
+/* ── numToCol: 0-based column index → A1 letter (A=0, Z=25, AA=26…) ── */
+function numToCol(n){var s='';n++;while(n>0){n--;s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26);}return s;}
+
+/* ── Sheets API: write one cell ── */
+async function writeToSheet(rowIdx,colIdx,val){
+  if(!spreadsheetId||!selSheet)return;
+  var range=encodeURIComponent("'"+selSheet+"'!"+numToCol(colIdx)+(rowIdx+1));
+  try{
+    await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'/values/'+range+'?valueInputOption=USER_ENTERED',{
+      method:'PUT',
+      headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
+      body:JSON.stringify({values:[[val===''||val==null?'':val]]})
+    });
+  }catch(e){console.error('writeToSheet:',e);}
+}
+
+/* ── Sheets API: write multiple cells at once ── */
+async function batchWriteToSheet(writes){
+  if(!spreadsheetId||!selSheet||!writes.length)return;
+  var data=writes.map(function(w){return{
+    range:"'"+selSheet+"'!"+numToCol(w.col)+(w.row+1),
+    values:[[w.value===''||w.value==null?'':w.value]]
+  };});
+  try{
+    var resp=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheetId+'/values:batchUpdate',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
+      body:JSON.stringify({valueInputOption:'USER_ENTERED',data:data})
+    });
+    if(!resp.ok){var e2=await resp.json();console.error('batchWrite error:',e2);}
+  }catch(e){console.error('batchWriteToSheet:',e);}
 }
 
 
@@ -1424,20 +1640,47 @@ function parseSheet(name){
 
 /* ═══ EXCEL WRITE (surgical via JSZip — preserves all original formatting) ═══ */
 
-/* setCell: stores pending write — does NOT touch the workbook object at all.
-   The original file's XML is patched surgically on saveWorkbook(). */
+/* setCell: routes to Sheets API (Google Sheets mode) or queues to pendingWrites (xlsx mode) */
 function setCell(ri,ci2,v){
   if(ri<0||ci2<0)return;
+  if(useGoogleSheets){
+    writeToSheet(ri,ci2,v);  /* async fire-and-forget; writes hit the live Google Sheet */
+    return;
+  }
   var addr=XLSX.utils.encode_cell({r:ri,c:ci2});
   if(v===''||v==null){pendingWrites[addr]=null;}  /* null = clear the cell value */
   else{pendingWrites[addr]={v:v,t:typeof v==='number'?'n':'s'};}
 }
 
-/* scheduleSave: data is already in localStorage (ls calls in sign-in functions).
-   Show a subtle indicator; trainer clicks Save when ready. */
-function scheduleSave(){showToast('✓ Attendance recorded — tap Save Excel to update file');}
+/* scheduleSave: Google Sheets writes are real-time; xlsx mode prompts manual save */
+/* ═══ TOAST ═══ */
+var _toastTimer=null;
+function showToast(msg,durationMs){
+  var el=document.getElementById('s-toast');
+  if(!el)return;
+  el.textContent=msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(function(){el.classList.remove('show');},durationMs||3200);
+}
 
-/* saveWorkbook: uses JSZip to patch ONLY changed cells, preserving everything else */
+function scheduleSave(){
+  if(useGoogleSheets){showToast('\u2713 Saved to Google Sheets');return;}
+  /* Show instant confirmation, then auto-save the xlsx in the background after a short idle delay */
+  showToast('\u2713 Attendance recorded \u2014 auto-saving\u2026');
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(function(){saveWorkbook(true);},2500);
+}
+
+/* ── Shared download helper ── */
+function triggerDownload(blob, filename){
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(a.href);},3000);
+}
+
+/* saveWorkbook: uses JSZip to patch ONLY changed cells, preserving everything else.
+   Returns the Blob so End Class can also upload it to Drive. */
 async function saveWorkbook(silent){
   if(!origBytes){if(!silent)alert('No file loaded.');return;}
   if(silent&&!Object.keys(pendingWrites).length)return;
@@ -1534,20 +1777,19 @@ async function saveWorkbook(silent){
     sheetXml=_applyWrites(sheetXml,writes);
     zip.file(sheetPath,sheetXml);
 
-    /* ── Generate and download ── */
+    /* ── Generate, download, AND return blob for Drive upload ── */
     var newBuf=await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
     origBytes=newBuf;
     pendingWrites={};
 
     var blob=new Blob([newBuf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     var fn=currentFileName||((selSheet||'attendance').replace(/\./g,'-')+'_updated.xlsx');
-    var dl=document.createElement('a');dl.href=URL.createObjectURL(blob);dl.download=fn;
-    document.body.appendChild(dl);dl.click();document.body.removeChild(dl);
-    setTimeout(function(){URL.revokeObjectURL(dl.href);},2000);
-    showToast('\u2713 Saved: '+fn+' \u2014 replace your original file with this');
+    if(!silent){triggerDownload(blob,fn);showToast('\u2713 Auto-saved: '+fn);}
+    return blob;   /* ← caller (ecConfirmPin) uses this for Drive upload */
   }catch(e){
     if(!silent)alert('Save failed: '+e.message);
     console.error('saveWorkbook:',e);
+    return null;
   }
 }
 
@@ -1934,13 +2176,12 @@ async function exportFormattedExcel(){
   /* ── DOWNLOAD ── */
   var buf;
   try{buf=await wb.xlsx.writeBuffer();}
-  catch(e){alert('Export failed — the device may be low on memory.\nClose other apps and try again.\n\n'+e.message);return;}
+  catch(e){alert('Export failed — the device may be low on memory.\nClose other apps and try again.\n\n'+e.message);return null;}
   var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   var fn='Gamma_Attendance_'+(selSheet||'data').replace(/\./g,'-')+'_Report.xlsx';
-  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fn;
-  document.body.appendChild(a);a.click();document.body.removeChild(a);
-  setTimeout(function(){URL.revokeObjectURL(a.href);},2000);
-  showToast('✓ Exported formatted report');
+  triggerDownload(blob,fn);
+  showToast('✓ Attendance report downloaded');
+  return blob;  /* ← caller (ecConfirmPin) uses this for Drive upload */
 }
 
 /* ═══ KIOSK ═══ */
@@ -2159,6 +2400,8 @@ function confirmSig(){
       setCell(s.rowIdx,C.wedHrs,5);   setCell(s.rowIdx,C.wedInit,tInit);
       setCell(s.rowIdx,C.offHrs,6);   setCell(s.rowIdx,C.offInit,tInit);
       setCell(s.rowIdx,C.trainerVerif,ci.trainer||'');
+      /* In Google Sheets mode: write a text marker to the signature column (R) */
+      if(useGoogleSheets){setCell(s.rowIdx,C.stdSig,'\u2713 Signed '+time);}
       scheduleSave();
     }
     closeSigPad();
@@ -2176,7 +2419,7 @@ function flash(m,sub){document.getElementById('f-msg').textContent=m;document.ge
 
 /* ═══ END CLASS ═══ */
 function openEndClass(){
-  if(!workbook||!students.length)return;
+  if((!workbook&&!spreadsheetId)||!students.length)return;
   _lastTap=0;
   ecRefresh();
   document.getElementById('ec-pin').value='';
@@ -2242,9 +2485,8 @@ function ecConfirmPin(){
     setTimeout(function(){document.getElementById('ec-pin').focus();},60);
     return;
   }
-  document.getElementById('ec-pin-err').textContent='';
-  /* End Class: save the file. saveWorkbook() handles download + update of origBytes. */
-  saveWorkbook(false);
+  /* Google Sheets: real-time writes — no file save needed. xlsx: patch + download. */
+  if(!useGoogleSheets){saveWorkbook(false);}else{showToast("✓ All attendance saved to Google Sheets");}
   /* Transition to done state */
   var noOutCount=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;}).length;
   var inCount=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn;}).length;
@@ -2281,15 +2523,18 @@ document.getElementById('ec-pin').addEventListener('keydown',function(e){
   if(e.key==='Enter')ecConfirmPin();
 });
 
-/* ═══ BEFOREUNLOAD: warn if active session has unsigned-out students ═══ */
+/* ═══ BEFOREUNLOAD: warn if unsigned-out students OR unsaved pending writes ═══ */
 function beforeUnloadHandler(e){
-  if(!workbook||!students.length)return;
+  if((!workbook&&!spreadsheetId)||!students.length)return;
   var noOut=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;});
-  if(!noOut.length)return;
+  var hasPending=pendingWrites&&Object.keys(pendingWrites).length>0;
+  if(!noOut.length&&!hasPending)return;
   e.preventDefault();
-  /* Modern browsers show their own generic message; this string is ignored */
-  e.returnValue=noOut.length+' student(s) have not signed out. Use "End Class" before closing.';
-  return e.returnValue;
+  var msg='';
+  if(noOut.length)msg+=noOut.length+' student(s) have not signed out. ';
+  if(hasPending)msg+='Unsaved attendance changes. ';
+  msg+='Please use “End Class” before closing.';
+  e.returnValue=msg;return e.returnValue;
 }
 window.addEventListener('beforeunload',beforeUnloadHandler);
 
@@ -2428,7 +2673,8 @@ function saveStudent(){
   closeAdd();renderTbl();renderStats();
 }
 
-window.addEventListener('load',function(){if(typeof XLSX==='undefined')showError('SheetJS library failed to load.');});
+window.addEventListener('load',function(){if(typeof XLSX==='undefined')console.warn('SheetJS not loaded — local xlsx fallback unavailable; Google Sheets mode still works.');});
+
 </script>
 </body>
 </html>
