@@ -485,6 +485,15 @@ window.addEventListener('beforeunload',beforeUnloadHandler);
 
 /* ═══ ADMIN VIEW ═══ */
 #admin-view{background:var(--bg-light);color:var(--text-d);min-height:100vh;flex-direction:column;}
+.alert-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:500;align-items:center;justify-content:center;}
+.alert-overlay.open{display:flex;}
+.alert-box{background:var(--bg-card);border:1px solid var(--border-w2);border-radius:24px;padding:32px 28px;width:calc(100% - 48px);max-width:400px;text-align:center;animation:popIn .18s ease;box-shadow:0 16px 48px rgba(0,0,0,.5);}
+.alert-icon{font-size:40px;margin-bottom:12px;}
+.alert-title{font-size:17px;font-weight:700;color:var(--text-w);margin-bottom:8px;}
+.alert-body{font-size:13px;color:var(--text-w3);line-height:1.6;margin-bottom:22px;}
+.alert-body strong{color:var(--amber);}
+.btn-alert-ok{padding:12px 36px;border-radius:30px;background:var(--accent);border:none;color:#fff;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;}
+.btn-alert-ok:active{opacity:.85;}
 .admin-more-wrap{position:relative;display:inline-block;}
 .btn-more{padding:8px 14px;border-radius:var(--radius-xs);font-family:var(--font);font-size:12px;font-weight:600;cursor:pointer;background:var(--bg-surface);border:1px solid var(--border-w2);color:var(--text-w2);display:flex;align-items:center;gap:5px;min-height:40px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .btn-more:active{background:var(--bg-dark);}
@@ -905,7 +914,20 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
 
 </div></div>
 
-<div class="admin-fab" id="admin-fab" style="display:none"><button onclick="navTap(openPin)">⚙ Trainer view</button></div>
+<!-- Alert modal -->
+<div class="alert-overlay" id="alert-overlay">
+  <div class="alert-box">
+    <div class="alert-icon" id="alert-icon">⚠️</div>
+    <div class="alert-title" id="alert-title">Action Required</div>
+    <div class="alert-body" id="alert-body"></div>
+    <button class="btn-alert-ok" onclick="closeAlert()">OK</button>
+  </div>
+</div>
+
+<!-- Admin-fab: shows Trainer View from kiosk, Back to Kiosk from admin -->
+<div class="admin-fab" id="admin-fab" style="display:none">
+  <button id="admin-fab-btn" onclick="navTap(openPin)">⚙ Trainer view</button>
+</div>
 
 <!-- ═══ PIN ═══ -->
 <div class="overlay" id="pin-overlay"><div class="pin-box">
@@ -937,7 +959,7 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
       <!-- Always visible -->
       <button class="btn-sm" id="bulk-out-btn" onclick="bulkSignOut()" style="border-color:rgba(239,68,68,.4);color:var(--red);">⬇ Bulk Sign-Out</button>
       <button class="btn-sm" id="admin-upload-btn" onclick="navTap(adminUploadDrive)" style="border-color:rgba(59,130,246,.5);color:#3b82f6;" title="Sign all students out first">☁ Upload to Drive</button>
-      <button class="btn-sm" id="admin-end-btn" onclick="tap(openEndClass)" style="color:var(--red);border-color:rgba(239,68,68,.3);" disabled title="Upload to Drive first">End Class</button>
+      <button class="btn-sm" id="admin-end-btn" onclick="tap(guardedEndClass)" style="color:var(--red);border-color:rgba(239,68,68,.3);">End Class</button>
       <!-- More dropdown -->
       <div class="admin-more-wrap" id="admin-more-wrap">
         <button class="btn-more" onclick="toggleMoreMenu()">☰ More ⌄</button>
@@ -946,7 +968,6 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
           <button onclick="closeMoreMenu();window.print();">🖨 Print</button>
           <button onclick="closeMoreMenu();exportFormattedExcel();">💾 Save to Excel</button>
           <button onclick="closeMoreMenu();navTap(toLanding);">📂 Change Class</button>
-          <button onclick="closeMoreMenu();navTap(toKiosk);">← Back to Kiosk</button>
         </div>
       </div>
     </div>
@@ -2494,43 +2515,117 @@ function checkLvPin(){
 document.getElementById('lv-pin-inp').addEventListener('keydown',function(e){if(e.key==='Enter')checkLvPin();});
 document.getElementById('lv-pin-inp').addEventListener('input',function(){if(this.value.length===4)setTimeout(checkLvPin,60);});
 
+/* ─── Alert modal helpers ─── */
+function showAlert(icon,title,body){
+  document.getElementById('alert-icon').textContent=icon;
+  document.getElementById('alert-title').textContent=title;
+  document.getElementById('alert-body').innerHTML=body;
+  document.getElementById('alert-overlay').classList.add('open');
+}
+function closeAlert(){document.getElementById('alert-overlay').classList.remove('open');}
+
+/* ─── Guarded End Class (shows modal if not ready) ─── */
+function guardedEndClass(){
+  var notOut=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;});
+  if(notOut.length){
+    var names=notOut.slice(0,5).map(function(s){return '<strong>'+s.name+'</strong>';}).join(', ')+(notOut.length>5?' and '+(notOut.length-5)+' more':'');
+    showAlert('\u26a0\ufe0f','Students Not Signed Out',
+      notOut.length+' student'+(notOut.length>1?'s are':' is')+' still signed in: '+names+
+      '.<br><br>Please use <strong style="color:var(--accent)">Bulk Sign-Out</strong> first, then upload to Drive before ending class.');
+    return;
+  }
+  if(!_driveUploaded){
+    showAlert('\u2601','Upload Required',
+      'Please tap <strong style="color:#3b82f6">\u2601 Upload to Drive</strong> first to save the attendance records before ending the class.');
+    return;
+  }
+  openEndClass();
+}
+
+/* ─── Upload with timeout wrapper ─── */
+function withTimeout(promise,ms,label){
+  return Promise.race([
+    promise,
+    new Promise(function(_,rej){setTimeout(function(){rej(new Error(label+' timed out after '+ms/1000+'s'));},ms);})
+  ]);
+}
+
 /* ─── Admin: Upload to Drive then unlock End Class ─── */
 var _driveUploaded=false;
 async function adminUploadDrive(){
   var btn=document.getElementById('admin-upload-btn');
   var stEl=document.getElementById('admin-upload-status');
-  var endBtn=document.getElementById('admin-end-btn');
   /* Gate: all signed-in students must have signed out */
   var notOut=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;});
   if(notOut.length){
-    showToast('\u26a0 '+notOut.length+' student'+(notOut.length>1?'s':'')+' still signed in \u2014 bulk sign-out first',4000);
-    if(stEl)stEl.textContent='\u26a0 '+notOut.length+' student'+(notOut.length>1?'s':'')+' still signed in. Use Bulk Sign-Out first.';
+    var names=notOut.slice(0,5).map(function(s){return '<strong>'+s.name+'</strong>';}).join(', ')+(notOut.length>5?' and '+(notOut.length-5)+' more':'');
+    showAlert('\u26a0\ufe0f','Students Not Signed Out',
+      notOut.length+' student'+(notOut.length>1?'s are':' is')+' still signed in: '+names+
+      '.<br><br>Use <strong style="color:var(--accent)">Bulk Sign-Out</strong> to sign them out first.');
     return;
   }
   if(btn)btn.disabled=true;
-  if(stEl)stEl.textContent='\u23f3 Building and uploading files\u2026';
+  if(stEl)stEl.textContent='\u23f3 Building files\u2026';
+
   var ds=todayISO();
   var baseClass=(ci.classCode||'Class').replace(/[^A-Za-z0-9_-]/g,'_');
   var origBase=(currentFileName||((selSheet||'attendance')+'.xlsx')).replace(/\.xlsx$/i,'');
   var xlsFn=origBase+'_'+ds+'.xlsx';
   var rptFn=origBase+'_Attendance_'+baseClass+'_'+ds+'.xlsx';
-  var xlsBlob=null,rptBlob=null,xlsOK=false,rptOK=false;
-  try{xlsBlob=await saveWorkbook(true);}catch(e){console.error('saveWorkbook admin:',e);}
-  try{rptBlob=await exportFormattedExcel(true);}catch(e){console.warn('exportFormattedExcel admin:',e);}
+
+  /* Build both blobs in parallel */
+  var xlsBlob=null,rptBlob=null;
+  try{
+    var results=await Promise.all([
+      saveWorkbook(true).catch(function(e){console.error('saveWorkbook:',e);return null;}),
+      exportFormattedExcel(true).catch(function(e){console.warn('exportFormattedExcel:',e);return null;})
+    ]);
+    xlsBlob=results[0]; rptBlob=results[1];
+  }catch(e){console.error('Build blobs:',e);}
+
+  /* Store for tap-to-download */
   _ecBlobs=[
     {blob:xlsBlob,filename:xlsFn,sub:'Tap to download \u2014 updated attendance data'},
     {blob:rptBlob,filename:rptFn,sub:'Tap to download \u2014 formatted report with signatures'}
   ].filter(function(x){return !!x.blob;});
   renderDlButtons();
-  try{if(xlsBlob){await uploadFileToDrive(xlsBlob,xlsFn);xlsOK=true;}}catch(eu){console.warn('Drive xlsx admin:',eu);}
-  try{if(rptBlob){await uploadFileToDrive(rptBlob,rptFn);rptOK=true;}}catch(eu){console.warn('Drive rpt admin:',eu);}
+
+  if(stEl)stEl.textContent='\u2601 Uploading to Drive\u2026';
+
+  /* Upload with 30-second timeout each */
+  var xlsOK=false,rptOK=false;
+  try{
+    if(xlsBlob){
+      await withTimeout(uploadFileToDrive(xlsBlob,xlsFn),30000,'Excel upload');
+      xlsOK=true;
+    }
+  }catch(eu){
+    console.warn('Drive xlsx:',eu);
+    if(eu.message&&(eu.message.indexOf('401')>=0||eu.message.indexOf('403')>=0)){
+      if(stEl)stEl.textContent='\u26a0 Session expired \u2014 please sign out and sign in again.';
+      if(btn)btn.disabled=false;
+      showAlert('\U0001f512','Session Expired','Your Google session has expired.<br><br>Please <strong>sign out</strong> (tap your name at the top) and sign in again to re-authenticate.');
+      return;
+    }
+  }
+  try{
+    if(rptBlob){
+      await withTimeout(uploadFileToDrive(rptBlob,rptFn),30000,'Report upload');
+      rptOK=true;
+    }
+  }catch(eu){console.warn('Drive report:',eu);}
+
   var ok=[xlsOK?'Excel':null,rptOK?'Report':null].filter(Boolean);
-  if(stEl)stEl.textContent=ok.length?'\u2601 Uploaded: '+ok.join(' & ')+' \u2014 End Class is now unlocked':'\u26a0 Upload failed \u2014 retry or download manually';
   if(btn)btn.disabled=false;
+
   if(xlsOK||rptOK){
     _driveUploaded=true;
-    if(endBtn){endBtn.disabled=false;endBtn.title='End the class session';}
+    if(stEl)stEl.textContent='\u2601 Uploaded: '+ok.join(' & ')+' \u2014 End Class is now unlocked';
     showToast('\u2705 Files uploaded \u2014 End Class is now available',4000);
+  }else{
+    if(stEl)stEl.textContent='\u26a0 Upload failed \u2014 check connection and retry';
+    showAlert('\u26a0\ufe0f','Upload Failed',
+      'Could not upload to Google Drive.<br><br>Your files have been prepared \u2014 tap the download buttons in the End Class screen to save locally. Check your internet connection and try again.');
   }
 }
 
@@ -2700,8 +2795,28 @@ function toLanding(){
   if(pinInp){pinInp.value='';document.getElementById('lv-pin-err').textContent='';}
   setTimeout(function(){var el=document.getElementById('lv-pin-inp');if(el)el.focus();},300);
 }
-function toKiosk(){_lastTap=0;document.getElementById('admin-view').classList.remove('active');document.getElementById('kiosk-view').classList.add('active');document.getElementById('admin-fab').style.display='flex';refreshKiosk();}
-function toAdmin(){_lastTap=0;document.getElementById('kiosk-view').classList.remove('active');document.getElementById('admin-view').classList.add('active');document.getElementById('admin-fab').style.display='none';renderStats();renderTbl();}
+function toKiosk(){
+  _lastTap=0;
+  document.getElementById('admin-view').classList.remove('active');
+  document.getElementById('kiosk-view').classList.add('active');
+  /* Restore fab to ⚙ Trainer view */
+  var fab=document.getElementById('admin-fab');
+  var fabBtn=document.getElementById('admin-fab-btn');
+  if(fab)fab.style.display='flex';
+  if(fabBtn){fabBtn.textContent='⚙ Trainer view';fabBtn.onclick=function(){navTap(openPin);};}
+  refreshKiosk();
+}
+function toAdmin(){
+  _lastTap=0;
+  document.getElementById('kiosk-view').classList.remove('active');
+  document.getElementById('admin-view').classList.add('active');
+  /* Show floating ← Kiosk button */
+  var fab=document.getElementById('admin-fab');
+  var fabBtn=document.getElementById('admin-fab-btn');
+  if(fab)fab.style.display='flex';
+  if(fabBtn){fabBtn.textContent='← Kiosk';fabBtn.onclick=function(){navTap(toKiosk);};}
+  renderStats();renderTbl();
+}
 
 function initAdminHeader(){
   document.getElementById('a-class-lbl').textContent=ci.classCode+'  ·  '+selSheet;
