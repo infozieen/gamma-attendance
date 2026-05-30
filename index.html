@@ -904,7 +904,7 @@ function signOutGoogle(){
   if(window.google && google.accounts && google.accounts.id){
     google.accounts.id.renderButton(document.getElementById('g-signin-btn'),
       {theme:'filled_black',size:'large',text:'signin_with',shape:'rectangular',width:280});
-    google.accounts.id.prompt();
+    try{ google.accounts.id.prompt(); }catch(e){}
   }
 }
 
@@ -915,14 +915,21 @@ function initGoogleAuth(){
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleCredentialResponse,
-    auto_select: true,
-    cancel_on_tap_outside: false
+    auto_select: false,
+    cancel_on_tap_outside: false,
+    use_fedcm_for_prompt: false
   });
+  /* Render the standard Google button */
   google.accounts.id.renderButton(
     document.getElementById('g-signin-btn'),
     {theme:'filled_black',size:'large',text:'signin_with',shape:'rectangular',width:280}
   );
-  google.accounts.id.prompt();
+  /* Only call prompt() once — it may be rate-limited, which is OK since button still works */
+  try{ google.accounts.id.prompt(function(notification){
+    if(notification.isSkippedMoment()||notification.isDismissedMoment()){
+      /* One Tap unavailable — user must click the button, which is already rendered */
+    }
+  }); }catch(e){}
   /* 2 — Token client for Drive API (drive scope: list, download, upload existing files) */
   if(google.accounts.oauth2){
     tokenClient = google.accounts.oauth2.initTokenClient({
