@@ -485,6 +485,13 @@ window.addEventListener('beforeunload',beforeUnloadHandler);
 
 /* ═══ ADMIN VIEW ═══ */
 #admin-view{background:var(--bg-light);color:var(--text-d);min-height:100vh;flex-direction:column;}
+.admin-more-wrap{position:relative;display:inline-block;}
+.btn-more{padding:8px 14px;border-radius:var(--radius-xs);font-family:var(--font);font-size:12px;font-weight:600;cursor:pointer;background:var(--bg-surface);border:1px solid var(--border-w2);color:var(--text-w2);display:flex;align-items:center;gap:5px;min-height:40px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+.btn-more:active{background:var(--bg-dark);}
+.more-dropdown{display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--bg-card);border:1px solid var(--border-w2);border-radius:14px;padding:6px;min-width:190px;z-index:200;box-shadow:0 8px 32px rgba(0,0,0,.45);flex-direction:column;gap:2px;}
+.more-dropdown.open{display:flex;}
+.more-dropdown button{width:100%;text-align:left;padding:10px 14px;border:none;background:none;border-radius:10px;font-family:var(--font);font-size:13px;color:var(--text-w2);cursor:pointer;display:flex;align-items:center;gap:10px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+.more-dropdown button:active,.more-dropdown button:hover{background:var(--bg-surface);color:var(--text-w);}
 .admin-topbar{background:var(--bg-dark);color:#fff;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:50;border-bottom:1px solid var(--border-w);}
 .topbar-left{display:flex;align-items:center;gap:14px;}
 .a-logo{font-size:15px;font-weight:700;color:var(--accent);letter-spacing:-.3px;}
@@ -927,14 +934,21 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
       <div class="a-class-lbl" id="a-class-lbl">—</div>
     </div>
     <div class="topbar-right">
-      <button class="btn-sm" onclick="openAdd()">+ Student</button>
+      <!-- Always visible -->
       <button class="btn-sm" id="bulk-out-btn" onclick="bulkSignOut()" style="border-color:rgba(239,68,68,.4);color:var(--red);">⬇ Bulk Sign-Out</button>
-      <button class="btn-sm" onclick="window.print()">🖨 Print</button>
-      <button class="btn-excel" onclick="exportFormattedExcel()">💾 Save to Excel</button>
-      <button class="btn-sm" onclick="navTap(adminUploadDrive)" id="admin-upload-btn" style="border-color:rgba(59,130,246,.5);color:#3b82f6;">☁ Upload to Drive</button>
-      <button class="btn-sm" onclick="navTap(toLanding)" style="border-color:rgba(255,255,255,.2);color:var(--text-w3);">📂 Files</button>
+      <button class="btn-sm" id="admin-upload-btn" onclick="navTap(adminUploadDrive)" style="border-color:rgba(59,130,246,.5);color:#3b82f6;" title="Sign all students out first">☁ Upload to Drive</button>
       <button class="btn-sm" id="admin-end-btn" onclick="tap(openEndClass)" style="color:var(--red);border-color:rgba(239,68,68,.3);" disabled title="Upload to Drive first">End Class</button>
-      <button class="btn-sm teal" onclick="navTap(toKiosk)">← Kiosk</button>
+      <!-- More dropdown -->
+      <div class="admin-more-wrap" id="admin-more-wrap">
+        <button class="btn-more" onclick="toggleMoreMenu()">☰ More ⌄</button>
+        <div class="more-dropdown" id="more-dropdown">
+          <button onclick="closeMoreMenu();openAdd();">➕ Add Student</button>
+          <button onclick="closeMoreMenu();window.print();">🖨 Print</button>
+          <button onclick="closeMoreMenu();exportFormattedExcel();">💾 Save to Excel</button>
+          <button onclick="closeMoreMenu();navTap(toLanding);">📂 Change Class</button>
+          <button onclick="closeMoreMenu();navTap(toKiosk);">← Back to Kiosk</button>
+        </div>
+      </div>
     </div>
   </div>
   <div class="admin-content">
@@ -2486,6 +2500,13 @@ async function adminUploadDrive(){
   var btn=document.getElementById('admin-upload-btn');
   var stEl=document.getElementById('admin-upload-status');
   var endBtn=document.getElementById('admin-end-btn');
+  /* Gate: all signed-in students must have signed out */
+  var notOut=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;});
+  if(notOut.length){
+    showToast('\u26a0 '+notOut.length+' student'+(notOut.length>1?'s':'')+' still signed in \u2014 bulk sign-out first',4000);
+    if(stEl)stEl.textContent='\u26a0 '+notOut.length+' student'+(notOut.length>1?'s':'')+' still signed in. Use Bulk Sign-Out first.';
+    return;
+  }
   if(btn)btn.disabled=true;
   if(stEl)stEl.textContent='\u23f3 Building and uploading files\u2026';
   var ds=todayISO();
@@ -2513,6 +2534,20 @@ async function adminUploadDrive(){
   }
 }
 
+
+/* ─── More dropdown ─── */
+function toggleMoreMenu(){
+  var dd=document.getElementById('more-dropdown');
+  if(dd)dd.classList.toggle('open');
+}
+function closeMoreMenu(){
+  var dd=document.getElementById('more-dropdown');
+  if(dd)dd.classList.remove('open');
+}
+document.addEventListener('click',function(e){
+  var wrap=document.getElementById('admin-more-wrap');
+  if(wrap&&!wrap.contains(e.target))closeMoreMenu();
+});
 
 function openEndClass(){
   if((!workbook&&!spreadsheetId)||!students.length)return;
