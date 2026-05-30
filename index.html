@@ -1053,7 +1053,7 @@ async function loadDriveFiles(){
   try{
     /* list subfolders */
     var qF="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
-    var urlF='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qF)+'&fields=files(id,name,modifiedTime)&orderBy=name&pageSize=100';
+    var urlF='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qF)+'&fields=files(id,name,modifiedTime)&orderBy=name&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true';
     var rF=await fetch(urlF,{headers:{'Authorization':'Bearer '+accessToken}});
     var dF=await rF.json();
     if(!rF.ok)throw new Error((dF.error&&dF.error.message)||'Drive API error '+rF.status);
@@ -1061,7 +1061,7 @@ async function loadDriveFiles(){
 
     /* also list xlsx files directly in root */
     var qX="'"+GDRIVE_FOLDER_ID+"' in parents and (mimeType='application/vnd.google-apps.spreadsheet' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') and trashed=false";
-    var urlX='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qX)+'&fields=files(id,name,modifiedTime,size,mimeType)&orderBy=name&pageSize=100';
+    var urlX='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qX)+'&fields=files(id,name,modifiedTime,size,mimeType)&orderBy=name&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true';
     var rX=await fetch(urlX,{headers:{'Authorization':'Bearer '+accessToken}});
     var dX=await rX.json();
     if(!rX.ok)throw new Error((dX.error&&dX.error.message)||'Drive API error '+rX.status);
@@ -1083,7 +1083,7 @@ async function openDriveFolder(folderId, folderName){
   document.getElementById('lv-drive-cards-wrap').style.display = 'none';
   try{
     var q="'"+folderId+"' in parents and (mimeType='application/vnd.google-apps.spreadsheet' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') and trashed=false";
-    var url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime,size,mimeType)&orderBy=name&pageSize=100';
+    var url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime,size,mimeType)&orderBy=name&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true';
     var resp=await fetch(url,{headers:{'Authorization':'Bearer '+accessToken}});
     var data=await resp.json();
     if(!resp.ok)throw new Error((data.error&&data.error.message)||'Drive API error '+resp.status);
@@ -1170,10 +1170,10 @@ async function loadDriveFile(fileId, fileName, fileMimeType){
     if(isNativeSheet){
       /* Export native Google Sheet as xlsx binary */
       url='https://www.googleapis.com/drive/v3/files/'+fileId+
-          '/export?mimeType='+encodeURIComponent('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          '/export?mimeType='+encodeURIComponent('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')+'&supportsAllDrives=true';
     } else {
       /* Download uploaded xlsx directly */
-      url='https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
+      url='https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media&supportsAllDrives=true';
     }
     var resp=await fetch(url,{headers:{'Authorization':'Bearer '+accessToken}});
     if(!resp.ok){
