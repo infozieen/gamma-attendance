@@ -1166,7 +1166,7 @@ function renderDriveBrowser(folder, folders, files){
     var safeId=f.id.replace(/'/g,"\\'");
     var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     html+='<div class="lv-card" style="border-left:3px solid var(--accent);" '+
-      'ontouchend="event.preventDefault();navTap(function(){openDriveFolder(\''+safeId+'\',\''+safeName+'\');})" ontouchstart="">'+
+      'onclick="navTap(function(){openDriveFolder(\''+safeId+'\',\''+safeName+'\');})" ontouchstart="">'+
       '<div class="lv-card-icon">📁</div>'+
       '<div class="lv-card-name">'+esc(f.name)+'</div>'+
       '<div class="lv-card-date">'+ds+'</div>'+
@@ -1186,7 +1186,7 @@ function renderDriveBrowser(folder, folders, files){
     var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var safeMime=(f.mimeType||'').replace(/'/g,"\\'");
     html+='<div class="lv-card" '+
-      'ontouchend="event.preventDefault();navTap(function(){loadDriveFile(\''+safeId+'\',\''+safeName+'\',\''+safeMime+'\');})" ontouchstart="">'+
+      'onclick="navTap(function(){loadDriveFile(\''+safeId+'\',\''+safeName+'\',\''+safeMime+'\');})" ontouchstart="">'+
       '<div class="lv-card-icon">'+(isNative?'📊':'📋')+'</div>'+
       '<div class="lv-card-name">'+esc(name)+'</div>'+
       '<div class="lv-card-date">'+ds+' · '+ts+'</div>'+
