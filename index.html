@@ -363,7 +363,7 @@ async function ecConfirmPin(){
       if(xlsBlob){triggerDownload(xlsBlob,xlsFn);try{await uploadFileToDrive(xlsBlob,xlsFn);xlsOK=true;}catch(eu){console.warn('Drive xlsx:',eu);}}
     }catch(e){console.error('saveWorkbook End Class:',e);}
     try{
-      rptBlob=await exportFormattedExcel();
+      rptBlob=await exportFormattedExcel(true);  /* silent — one download below */
       if(rptBlob){triggerDownload(rptBlob,rptFn);try{await uploadFileToDrive(rptBlob,rptFn);rptOK=true;}catch(eu){console.warn('Drive report:',eu);}}
     }catch(e){console.warn('Report End Class:',e);}
     var parts=[xlsOK?'Updated Excel':null,rptOK?'Attendance Report':null].filter(Boolean);
@@ -1082,7 +1082,7 @@ async function loadDriveFiles(){
     driveFolders=dF.files||[];
 
     /* also list xlsx files directly in root */
-    var qX="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
+    var qX="'"+GDRIVE_FOLDER_ID+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
     var urlX='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qX)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
     var rX=await fetch(urlX,{headers:{'Authorization':'Bearer '+accessToken}});
     var dX=await rX.json();
@@ -1104,7 +1104,7 @@ async function openDriveFolder(folderId, folderName){
   document.getElementById('lv-drive-loading').style.display    = 'flex';
   document.getElementById('lv-drive-cards-wrap').style.display = 'none';
   try{
-    var q="'"+folderId+"' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
+    var q="'"+folderId+"' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
     var url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime%20desc&pageSize=50';
     var resp=await fetch(url,{headers:{'Authorization':'Bearer '+accessToken}});
     var data=await resp.json();
@@ -1178,44 +1178,27 @@ function renderDriveBrowser(folder, folders, files){
   grid.innerHTML=html;
 }
 
-/* ─── Google Sheets: open a spreadsheet from Drive (file ID = spreadsheet ID) ─── */
+/* ─── Drive API: download selected xlsx and open in the kiosk ─── */
 async function loadDriveFile(fileId, fileName){
-  showLvStatus('Opening '+fileName+'…'); showLvError('');
-  spreadsheetId=fileId; currentFileName=fileName; useGoogleSheets=true;
-  workbook=null; origBytes=null; pendingWrites={}; fileHandle=null;
+  showLvStatus('Downloading '+fileName+'…'); showLvError('');
+  /* Reset to local-xlsx mode (NOT Google Sheets API mode) */
+  useGoogleSheets=false; spreadsheetId=null;
+  currentFileName=fileName; fileHandle=null; origBytes=null; pendingWrites={}; workbook=null;
   try{
-    /* 1 — Fetch spreadsheet metadata (sheet tab names) */
-    var r1=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+fileId+'?fields=sheets.properties',
+    /* Download the actual xlsx binary via Drive API */
+    var resp=await fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media',
       {headers:{'Authorization':'Bearer '+accessToken}});
-    var d1=await r1.json();
-    if(!r1.ok)throw new Error((d1.error&&d1.error.message)||'Sheets API error '+r1.status);
-    var allNames=(d1.sheets||[]).map(function(s){return s.properties.title;});
-    var names=allNames.filter(function(n){return !/^summary$/i.test(n);});
-    if(!names.length){showLvStatus('');showLvError('No class sheets found in this spreadsheet.');return;}
-
-    /* 2 — Batch-fetch D4 from each sheet to display dates on selector buttons */
-    var qRanges=names.map(function(n){return 'ranges='+encodeURIComponent("'"+n+"'!D4");}).join('&');
-    var r2=await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+fileId+'/values:batchGet?'+qRanges+'&valueRenderOption=UNFORMATTED_VALUE',
-      {headers:{'Authorization':'Bearer '+accessToken}});
-    var d2=await r2.json();
-    var dates=(d2.valueRanges||[]).map(function(vr){
-      var v=vr.values&&vr.values[0]&&vr.values[0][0];
-      if(!v)return '';
-      if(typeof v==='number'&&v>40000&&v<60000){
-        var dt=new Date(Math.round((v-25569)*86400*1000));
-        return dt.toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});
-      }
-      return String(v);
-    });
-
-    showLvStatus('');
-    showSheetSelectorGS(names,dates);
+    if(!resp.ok)throw new Error('Download failed (HTTP '+resp.status+')');
+    var buf=await resp.arrayBuffer();
+    origBytes=buf;
+    var u8=new Uint8Array(buf);
+    try{workbook=XLSX.read(u8,{type:'array',cellStyles:true,cellNF:true});}
+    catch(e2){workbook=XLSX.read(u8,{type:'array'});}
+    showLvStatus(''); showSheetSelector();
   }catch(e){
-    showLvStatus(''); showLvError('Could not open spreadsheet: '+e.message);
-    spreadsheetId=null; useGoogleSheets=false;
+    showLvStatus(''); showLvError('Could not open file: '+e.message);
   }
 }
-
 /* ─── Single-file loader fallback ─── */
 function loadSingleFile(input){
   var files=Array.from(input.files||[]);
@@ -1866,7 +1849,7 @@ function _patchCell(rowXml,addr,colIdx,chg){
 function _xlCol(col){var n=0;for(var i=0;i<col.length;i++)n=n*26+(col.charCodeAt(i)-64);return n-1;}
 
 /* ═══ FORMATTED EXCEL EXPORT (ExcelJS) ═══ */
-async function exportFormattedExcel(){
+async function exportFormattedExcel(silent){
   if(typeof ExcelJS==='undefined'){alert('ExcelJS library not loaded. Check internet connection.');return;}
 
   var wb=new ExcelJS.Workbook();
@@ -2179,9 +2162,8 @@ async function exportFormattedExcel(){
   catch(e){alert('Export failed — the device may be low on memory.\nClose other apps and try again.\n\n'+e.message);return null;}
   var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   var fn='Gamma_Attendance_'+(selSheet||'data').replace(/\./g,'-')+'_Report.xlsx';
-  triggerDownload(blob,fn);
-  showToast('✓ Attendance report downloaded');
-  return blob;  /* ← caller (ecConfirmPin) uses this for Drive upload */
+  if(!silent){triggerDownload(blob,fn);showToast('✓ Attendance report downloaded');}
+  return blob;  /* ← caller (ecConfirmPin) triggers download with dated name */
 }
 
 /* ═══ KIOSK ═══ */
