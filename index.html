@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gamma Education — Attendance</title>
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gamma Attend">
+<meta name="theme-color" content="#0c111d">
+<meta name="application-name" content="Gamma Attendance">
+<link id="pwa-apple-icon" rel="apple-touch-icon" href="">
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" onerror="this.remove()">
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -2683,6 +2690,75 @@ function saveStudent(){
 }
 
 window.addEventListener('load',function(){if(typeof XLSX==='undefined')console.warn('SheetJS not loaded — local xlsx fallback unavailable; Google Sheets mode still works.');});
+
+/* ═══ PWA: inline manifest + service worker (single-file, GitHub Pages safe) ═══ */
+(function(){
+  /* --- Manifest via blob URL --- */
+  var icons=[];
+  if(typeof logoBase64==='string'&&logoBase64.length>100){
+    icons=[
+      {src:logoBase64,sizes:'192x192',type:'image/png',purpose:'any maskable'},
+      {src:logoBase64,sizes:'512x512',type:'image/png',purpose:'any maskable'}
+    ];
+    /* Apple touch icon */
+    var appleLink=document.getElementById('pwa-apple-icon');
+    if(appleLink)appleLink.href=logoBase64;
+  }
+  var manifest={
+    name:'Gamma Education Attendance',
+    short_name:'GammaAttend',
+    description:'Kiosk attendance tracking for Gamma Education Pty Ltd',
+    start_url:'.',
+    display:'standalone',
+    orientation:'any',
+    background_color:'#0c111d',
+    theme_color:'#0c111d',
+    icons:icons
+  };
+  try{
+    var mBlob=new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'});
+    var mURL=URL.createObjectURL(mBlob);
+    var mLink=document.createElement('link');
+    mLink.rel='manifest';mLink.href=mURL;
+    document.head.appendChild(mLink);
+  }catch(me){console.warn('PWA manifest:',me);}
+
+  /* --- Service worker: cache-first for the app shell --- */
+  if(!('serviceWorker' in navigator))return;
+  var CACHE='gamma-attend-v1';
+  var swSrc=[
+    "var CACHE='gamma-attend-v1';",
+    "self.addEventListener('install',function(e){",
+    "  e.waitUntil(caches.open(CACHE).then(function(c){",
+    "    return c.add(self.location.pathname);",
+    "  }).then(function(){return self.skipWaiting();}));",
+    "});",
+    "self.addEventListener('activate',function(e){",
+    "  e.waitUntil(caches.keys().then(function(keys){",
+    "    return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));",
+    "  }).then(function(){return self.clients.claim();}));",
+    "});",
+    "self.addEventListener('fetch',function(e){",
+    "  if(e.request.method!=='GET')return;",
+    "  e.respondWith(caches.match(e.request).then(function(cached){",
+    "    if(cached)return cached;",
+    "    return fetch(e.request).then(function(resp){",
+    "      if(!resp||resp.status!==200||resp.type==='opaque')return resp;",
+    "      var clone=resp.clone();",
+    "      caches.open(CACHE).then(function(c){c.put(e.request,clone);});",
+    "      return resp;",
+    "    });",
+    "  }));",
+    "});"
+  ].join('\n');
+  try{
+    var swBlob=new Blob([swSrc],{type:'application/javascript'});
+    var swURL=URL.createObjectURL(swBlob);
+    navigator.serviceWorker.register(swURL,{scope:'./'})
+      .then(function(reg){console.log('SW registered scope:',reg.scope);})
+      .catch(function(err){console.warn('SW registration failed:',err);});
+  }catch(swe){console.warn('PWA service worker:',swe);}
+})();
 
 </script>
 </body>
