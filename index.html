@@ -132,6 +132,18 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-w);font-
 .ec-unsigned-name{color:var(--text-w);font-weight:500;}
 .ec-unsigned-time{font-family:var(--mono);font-size:11px;color:var(--accent);}
 .ec-none-msg{padding:16px;text-align:center;color:var(--accent);font-size:14px;}
+.lv-pin-gate{display:flex;flex-direction:column;align-items:center;gap:18px;padding:40px 24px;width:100%;max-width:360px;}
+.lv-pin-title{font-size:16px;font-weight:700;color:var(--text-w);margin-bottom:2px;}
+.lv-pin-sub{font-size:12px;color:var(--text-w3);}
+.lv-pin-input{width:140px;text-align:center;letter-spacing:8px;font-size:24px;font-family:var(--font);padding:12px 16px;border-radius:12px;border:1.5px solid var(--border-w2);background:var(--bg-card2);color:var(--text-w);outline:none;}
+.lv-pin-input:focus{border-color:var(--accent);}
+.lv-pin-err{font-size:12px;color:var(--red);min-height:16px;}
+.btn-lv-pin{padding:12px 40px;border-radius:30px;background:var(--accent);border:none;color:#fff;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;}
+.btn-lv-pin:active{opacity:.85;}
+.btn-upload-drive{width:100%;padding:13px 16px;background:var(--bg-card2);border:1.5px solid #3b82f6;border-radius:var(--radius-sm);font-family:var(--font);font-size:13px;font-weight:600;color:#3b82f6;cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:left;display:flex;align-items:center;gap:10px;touch-action:manipulation;margin-bottom:10px;}
+.btn-upload-drive:active{background:rgba(59,130,246,.12);}
+.btn-upload-drive:disabled{opacity:.35;cursor:not-allowed;}
+.admin-upload-status{font-size:11px;color:var(--text-w3);min-height:16px;margin-bottom:6px;text-align:left;}
 .btn-bulk-end{width:100%;padding:13px;background:var(--amber-faint);border:1.5px solid rgba(245,158,11,.3);color:var(--amber);border-radius:var(--radius-sm);font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:16px;transition:all .15s;-webkit-tap-highlight-color:transparent;}
 .btn-bulk-end:active{background:rgba(245,158,11,.2);}
 .btn-bulk-end:disabled{opacity:.35;cursor:not-allowed;}
@@ -274,9 +286,7 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-w);font-
 .admin-fab{position:fixed;bottom:24px;right:24px;z-index:100;display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
 .admin-fab button{background:var(--bg-card);border:1px solid var(--border-w2);color:var(--text-w2);padding:10px 18px;border-radius:30px;font-family:var(--font);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .admin-fab button:hover{background:var(--bg-surface);color:var(--text-w);border-color:var(--accent);}
-
-
-/* ═══ END CLASS ═══ */
+/* ─── Landing PIN gate ─── */
 function openEndClass(){
   if((!workbook&&!spreadsheetId)||!students.length)return;
   _lastTap=0;
@@ -419,6 +429,11 @@ async function ecConfirmPin(){
   document.getElementById('ec-active').style.display='none';
   document.getElementById('ec-done').style.display='';
   window.removeEventListener('beforeunload',beforeUnloadHandler);
+  /* Auto-return to landing (PIN gate) after 4 seconds */
+  setTimeout(function(){
+    closeEndClass();
+    toLanding();
+  },4000);
 }
 function ecCloseTab(){
   /* window.close() only works on tabs opened via script.
@@ -669,8 +684,20 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
     </div>
   </div>
 
-  <!-- Drive-integrated body -->
-  <div class="lv-drive-body" id="lv-drive-body">
+  <!-- Trainer PIN gate (shown after Google auth, before Drive files) -->
+  <div class="lv-drive-body" id="lv-pin-gate-body" style="display:flex;">
+    <div class="lv-pin-gate">
+      <div class="lv-pin-title">?? Trainer PIN Required</div>
+      <div class="lv-pin-sub">Enter your 4-digit PIN to access class files</div>
+      <input type="password" id="lv-pin-inp" class="lv-pin-input" maxlength="4"
+        placeholder="••••" inputmode="numeric" autocomplete="off"/>
+      <div class="lv-pin-err" id="lv-pin-err"></div>
+      <button class="btn-lv-pin" onclick="checkLvPin()">Enter</button>
+    </div>
+  </div>
+
+  <!-- Drive-integrated body (hidden until PIN verified) -->
+  <div class="lv-drive-body" id="lv-drive-body" style="display:none;">
     <div class="lv-welcome" style="margin-bottom:16px;">Welcome, <strong id="lv-user-name">Trainer</strong></div>
 
     <!-- Loading state -->
@@ -746,8 +773,6 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
     </div>
     <div class="kv-bar-right">
       <span class="kv-clock" id="kv-clock">00:00</span>
-      <button class="kv-back-btn" onclick="navTap(toLanding)">&#8592; Files</button>
-      <button class="kv-back-btn" style="color:var(--red);border-color:rgba(239,68,68,.3);" onclick="tap(openEndClass)">End Class</button>
     </div>
   </div>
 
@@ -906,10 +931,14 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
       <button class="btn-sm" id="bulk-out-btn" onclick="bulkSignOut()" style="border-color:rgba(239,68,68,.4);color:var(--red);">⬇ Bulk Sign-Out</button>
       <button class="btn-sm" onclick="window.print()">🖨 Print</button>
       <button class="btn-excel" onclick="exportFormattedExcel()">💾 Save to Excel</button>
+      <button class="btn-sm" onclick="navTap(adminUploadDrive)" id="admin-upload-btn" style="border-color:rgba(59,130,246,.5);color:#3b82f6;">☁ Upload to Drive</button>
+      <button class="btn-sm" onclick="navTap(toLanding)" style="border-color:rgba(255,255,255,.2);color:var(--text-w3);">📂 Files</button>
+      <button class="btn-sm" id="admin-end-btn" onclick="tap(openEndClass)" style="color:var(--red);border-color:rgba(239,68,68,.3);" disabled title="Upload to Drive first">End Class</button>
       <button class="btn-sm teal" onclick="navTap(toKiosk)">← Kiosk</button>
     </div>
   </div>
   <div class="admin-content">
+    <div class="admin-upload-status" id="admin-upload-status"></div>
     <div class="meta-bar" id="meta-bar"></div>
     <div class="stats-row" id="stats"></div>
     <div class="toolbar">
@@ -965,7 +994,7 @@ var PIN = '1234';
    2. GDRIVE_FOLDER_URL → your restricted shared Drive folder link
    ═══════════════════════════════════════════════════════════════════ */
 var GOOGLE_CLIENT_ID  = '985606939375-rimlr7sqkpvva5lsvj61nq85ao4qcmfo.apps.googleusercontent.com';
-var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/11UY74zQ5IiSRYAFFg1x96j1g0oeU1-ei?usp=sharing';
+var GDRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1XwWAM38H4KKHS4hqprIWQLTqBDs0VGw5?usp=drive_link';
 var ALLOWED_DOMAIN    = 'gamma.edu.au';
 /* Extract folder ID from URL automatically */
 var GDRIVE_FOLDER_ID  = (GDRIVE_FOLDER_URL.match(/\/folders\/([^?/]+)/)||[])[1]||'';
@@ -1020,10 +1049,13 @@ function showApp(){
   document.getElementById('lv-user-name').textContent   = googleUser.name.split(' ')[0];
   document.getElementById('auth-gate').style.display    = 'none';
   document.getElementById('landing-view').classList.add('active');
-  /* Show loading spinner while Drive files load */
-  document.getElementById('lv-drive-loading').style.display    = 'flex';
+  /* Show PIN gate — Drive files load only after PIN verified */
+  document.getElementById('lv-pin-gate-body').style.display = 'flex';
+  document.getElementById('lv-drive-body').style.display    = 'none';
+  document.getElementById('lv-drive-loading').style.display    = 'none';
   document.getElementById('lv-drive-cards-wrap').style.display = 'none';
   document.getElementById('lv-drive-error').style.display      = 'none';
+  setTimeout(function(){var el=document.getElementById('lv-pin-inp');if(el)el.focus();},300);
 }
 
 function signOutGoogle(){
@@ -2431,9 +2463,57 @@ function confirmSig(){
   }
 }
 function flash(m,sub){document.getElementById('f-msg').textContent=m;document.getElementById('f-sub').textContent=sub;var e=document.getElementById('s-flash');e.classList.add('show');setTimeout(function(){e.classList.remove('show');},2200);}
+function checkLvPin(){
+  var val=(document.getElementById('lv-pin-inp').value||'').trim();
+  var errEl=document.getElementById('lv-pin-err');
+  if(val!==PIN){errEl.textContent='Incorrect PIN. Please try again.';document.getElementById('lv-pin-inp').value='';return;}
+  errEl.textContent='';
+  document.getElementById('lv-pin-gate-body').style.display='none';
+  document.getElementById('lv-drive-body').style.display='flex';
+  document.getElementById('lv-drive-loading').style.display='flex';
+  document.getElementById('lv-drive-cards-wrap').style.display='none';
+  document.getElementById('lv-drive-error').style.display='none';
+  if(accessToken){loadDriveFiles();}
+  else if(tokenClient){tokenClient.requestAccessToken({prompt:''});}
+  else{showDriveError('Drive API not ready. Please refresh the page.');}
+}
+document.getElementById('lv-pin-inp').addEventListener('keydown',function(e){if(e.key==='Enter')checkLvPin();});
+document.getElementById('lv-pin-inp').addEventListener('input',function(){if(this.value.length===4)setTimeout(checkLvPin,60);});
+
+/* ─── Admin: Upload to Drive then unlock End Class ─── */
+var _driveUploaded=false;
+async function adminUploadDrive(){
+  var btn=document.getElementById('admin-upload-btn');
+  var stEl=document.getElementById('admin-upload-status');
+  var endBtn=document.getElementById('admin-end-btn');
+  if(btn)btn.disabled=true;
+  if(stEl)stEl.textContent='\u23f3 Building and uploading files\u2026';
+  var ds=todayISO();
+  var baseClass=(ci.classCode||'Class').replace(/[^A-Za-z0-9_-]/g,'_');
+  var origBase=(currentFileName||((selSheet||'attendance')+'.xlsx')).replace(/\.xlsx$/i,'');
+  var xlsFn=origBase+'_'+ds+'.xlsx';
+  var rptFn=origBase+'_Attendance_'+baseClass+'_'+ds+'.xlsx';
+  var xlsBlob=null,rptBlob=null,xlsOK=false,rptOK=false;
+  try{xlsBlob=await saveWorkbook(true);}catch(e){console.error('saveWorkbook admin:',e);}
+  try{rptBlob=await exportFormattedExcel(true);}catch(e){console.warn('exportFormattedExcel admin:',e);}
+  _ecBlobs=[
+    {blob:xlsBlob,filename:xlsFn,sub:'Tap to download \u2014 updated attendance data'},
+    {blob:rptBlob,filename:rptFn,sub:'Tap to download \u2014 formatted report with signatures'}
+  ].filter(function(x){return !!x.blob;});
+  renderDlButtons();
+  try{if(xlsBlob){await uploadFileToDrive(xlsBlob,xlsFn);xlsOK=true;}}catch(eu){console.warn('Drive xlsx admin:',eu);}
+  try{if(rptBlob){await uploadFileToDrive(rptBlob,rptFn);rptOK=true;}}catch(eu){console.warn('Drive rpt admin:',eu);}
+  var ok=[xlsOK?'Excel':null,rptOK?'Report':null].filter(Boolean);
+  if(stEl)stEl.textContent=ok.length?'\u2601 Uploaded: '+ok.join(' & ')+' \u2014 End Class is now unlocked':'\u26a0 Upload failed \u2014 retry or download manually';
+  if(btn)btn.disabled=false;
+  if(xlsOK||rptOK){
+    _driveUploaded=true;
+    if(endBtn){endBtn.disabled=false;endBtn.title='End the class session';}
+    showToast('\u2705 Files uploaded \u2014 End Class is now available',4000);
+  }
+}
 
 
-/* ═══ END CLASS ═══ */
 function openEndClass(){
   if((!workbook&&!spreadsheetId)||!students.length)return;
   _lastTap=0;
@@ -2564,7 +2644,27 @@ document.getElementById('pin-inp').addEventListener('input',function(){if(this.v
 function checkPin(){if(document.getElementById('pin-inp').value===PIN){closePin();toAdmin();}else{document.getElementById('pin-err').textContent='Incorrect PIN.';document.getElementById('pin-inp').value='';}}
 
 /* ═══ VIEW SWITCHING ═══ */
-function toLanding(){_lastTap=0;document.getElementById('kiosk-view').classList.remove('active');document.getElementById('admin-view').classList.remove('active');document.getElementById('admin-fab').style.display='none';document.getElementById('landing-view').classList.add('active');workbook=null;fileHandle=null;origBytes=null;pendingWrites={};students=[];sessions={};showLvStatus('');showLvError('');}
+function toLanding(){
+  _lastTap=0;
+  document.getElementById('kiosk-view').classList.remove('active');
+  document.getElementById('admin-view').classList.remove('active');
+  document.getElementById('admin-fab').style.display='none';
+  document.getElementById('landing-view').classList.add('active');
+  workbook=null;fileHandle=null;origBytes=null;pendingWrites={};students=[];sessions={};
+  showLvStatus('');showLvError('');
+  /* Reset upload flag + show PIN gate for next trainer */
+  _driveUploaded=false;
+  var endBtn=document.getElementById('admin-end-btn');if(endBtn)endBtn.disabled=true;
+  var upSt=document.getElementById('admin-upload-status');if(upSt)upSt.textContent='';
+  document.getElementById('lv-pin-gate-body').style.display='flex';
+  document.getElementById('lv-drive-body').style.display='none';
+  document.getElementById('lv-drive-loading').style.display='none';
+  document.getElementById('lv-drive-cards-wrap').style.display='none';
+  document.getElementById('lv-drive-error').style.display='none';
+  var pinInp=document.getElementById('lv-pin-inp');
+  if(pinInp){pinInp.value='';document.getElementById('lv-pin-err').textContent='';}
+  setTimeout(function(){var el=document.getElementById('lv-pin-inp');if(el)el.focus();},300);
+}
 function toKiosk(){_lastTap=0;document.getElementById('admin-view').classList.remove('active');document.getElementById('kiosk-view').classList.add('active');document.getElementById('admin-fab').style.display='flex';refreshKiosk();}
 function toAdmin(){_lastTap=0;document.getElementById('kiosk-view').classList.remove('active');document.getElementById('admin-view').classList.add('active');document.getElementById('admin-fab').style.display='none';renderStats();renderTbl();}
 
