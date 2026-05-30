@@ -147,6 +147,14 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-w);font-
 .btn-close-tab{width:100%;padding:14px;background:var(--red);border:none;border-radius:var(--radius-sm);font-family:var(--font);font-size:15px;font-weight:600;color:#fff;cursor:pointer;margin-bottom:10px;-webkit-tap-highlight-color:transparent;}
 .btn-close-tab:active{opacity:.8;}
 .btn-stay{width:100%;padding:11px;background:none;border:1px solid var(--border-w2);border-radius:var(--radius-sm);font-family:var(--font);font-size:14px;color:var(--text-w3);cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.ec-dl-row{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
+.btn-dl{width:100%;padding:14px 16px;background:var(--bg-card2);border:1.5px solid var(--accent);border-radius:var(--radius-sm);font-family:var(--font);font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:left;display:flex;align-items:center;gap:10px;touch-action:manipulation;min-height:54px;}
+.btn-dl:active{background:var(--accent-faint);}
+.btn-dl-icon{font-size:20px;flex-shrink:0;}
+.btn-dl-info{display:flex;flex-direction:column;gap:2px;overflow:hidden;}
+.btn-dl-name{font-size:11px;font-weight:700;color:var(--text-w);word-break:break-all;}
+.btn-dl-sub{font-size:10px;color:var(--text-w3);font-weight:400;}
+.ec-drive-status{font-size:11px;color:var(--text-w3);margin-bottom:14px;min-height:18px;text-align:center;}
 
 /* ═══ SHEET SELECTOR ═══ */
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:200;align-items:center;justify-content:center;}
@@ -322,6 +330,23 @@ function ecBulkSignOut(){
 }
 
 /* \u2500\u2500\u2500 Drive multipart upload (requires drive.file scope) \u2500\u2500\u2500 */
+/* End-Class blob store: downloads via button taps = fresh user gesture on Android */
+var _ecBlobs=[];
+function renderDlButtons(){
+  var row=document.getElementById('ec-dl-row');
+  if(!row)return;
+  if(!_ecBlobs.length){row.innerHTML='';return;}
+  row.innerHTML=_ecBlobs.map(function(item,i){
+    return '<button class="btn-dl" onclick="_ecBlobs['+i+'].blob&&triggerDownload(_ecBlobs['+i+'].blob,_ecBlobs['+i+'].filename)">'+
+      '<span class="btn-dl-icon">⬇️</span>'+
+      '<span class="btn-dl-info">'+
+        '<span class="btn-dl-name">'+item.filename+'</span>'+
+        '<span class="btn-dl-sub">'+item.sub+'</span>'+
+      '</span>'+
+    '</button>';
+  }).join('');
+}
+
 async function uploadFileToDrive(blob,filename){
   if(!accessToken){console.warn('No Drive token \u2014 cannot upload '+filename);return null;}
   var folderId=currentDriveFolder?currentDriveFolder.id:GDRIVE_FOLDER_ID;
@@ -354,21 +379,30 @@ async function ecConfirmPin(){
   var baseClass=(ci.classCode||'Class').replace(/[^A-Za-z0-9_-]/g,'_');
   var origBase=(currentFileName||((selSheet||'attendance')+'.xlsx')).replace(/\.xlsx$/i,'');
   var xlsFn=origBase+'_'+ds+'.xlsx';
-  var rptFn='Gamma_Attendance_'+baseClass+'_'+ds+'.xlsx';
+  var rptFn=origBase+'_Attendance_'+baseClass+'_'+ds+'.xlsx';
+  var dsEl=document.getElementById('ec-drive-status');
   if(!useGoogleSheets){
-    showToast('\u23f3 Saving & uploading to Drive\u2026',12000);
-    var xlsBlob=null,rptBlob=null,xlsOK=false,rptOK=false;
-    try{
-      xlsBlob=await saveWorkbook(true);
-      if(xlsBlob){triggerDownload(xlsBlob,xlsFn);try{await uploadFileToDrive(xlsBlob,xlsFn);xlsOK=true;}catch(eu){console.warn('Drive xlsx:',eu);}}
-    }catch(e){console.error('saveWorkbook End Class:',e);}
-    try{
-      rptBlob=await exportFormattedExcel(true);  /* silent — one download below */
-      if(rptBlob){triggerDownload(rptBlob,rptFn);try{await uploadFileToDrive(rptBlob,rptFn);rptOK=true;}catch(eu){console.warn('Drive report:',eu);}}
-    }catch(e){console.warn('Report End Class:',e);}
-    var parts=[xlsOK?'Updated Excel':null,rptOK?'Attendance Report':null].filter(Boolean);
-    showToast(parts.length?'\u2601 Uploaded to Drive: '+parts.join(' & ')+' \u2014 also downloaded locally':'\u26a0 Drive upload failed \u2014 files downloaded locally',5500);
-  }else{showToast('\u2713 All attendance saved to Google Sheets');}
+    showToast('\u23f3 Building files\u2026',15000);
+    var xlsBlob=null,rptBlob=null;
+    try{xlsBlob=await saveWorkbook(true);}catch(e){console.error('saveWorkbook:',e);}
+    try{rptBlob=await exportFormattedExcel(true);}catch(e){console.warn('exportFormattedExcel:',e);}
+    _ecBlobs=[
+      {blob:xlsBlob,filename:xlsFn,sub:'Tap to download — updated attendance data'},
+      {blob:rptBlob,filename:rptFn,sub:'Tap to download — formatted report with signatures'}
+    ].filter(function(x){return !!x.blob;});
+    renderDlButtons();
+    showToast('\u2705 Files ready — tap buttons to download',4500);
+    if(dsEl)dsEl.textContent='\u2601 Uploading to Drive\u2026';
+    setTimeout(async function(){
+      var ok=[];
+      try{if(xlsBlob){await uploadFileToDrive(xlsBlob,xlsFn);ok.push('Excel');}}catch(eu){console.warn('Drive xlsx:',eu);}
+      try{if(rptBlob){await uploadFileToDrive(rptBlob,rptFn);ok.push('Report');}}catch(eu){console.warn('Drive report:',eu);}
+      if(dsEl)dsEl.textContent=ok.length?'\u2601 Uploaded to Drive: '+ok.join(' & '):'\u26a0 Drive upload failed — use download buttons below';
+    },400);
+  }else{
+    _ecBlobs=[];renderDlButtons();if(dsEl)dsEl.textContent='';
+    showToast('\u2713 All attendance saved to Google Sheets');
+  }
   var noOutCount=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn&&!sessions[s.id].signOut;}).length;
   var inCount=students.filter(function(s){return sessions[s.id]&&sessions[s.id].signIn;}).length;
   document.getElementById('ec-done-sub').textContent=
@@ -823,6 +857,8 @@ button,.btn-pick,.btn-in,.btn-out,.sheet-btn,.kv-result,.kv-tab,
       <div class="ec-done-icon">✅</div>
       <div class="ec-done-msg">Class Ended</div>
       <div class="ec-done-sub" id="ec-done-sub">All records saved.</div>
+      <div class="ec-dl-row" id="ec-dl-row"></div>
+      <div class="ec-drive-status" id="ec-drive-status"></div>
       <button class="btn-close-tab" onclick="ecCloseTab()">Close Tab</button>
       <button class="btn-stay" onclick="ecStayOnPage()">Return to Landing</button>
     </div>
@@ -1123,7 +1159,7 @@ function renderDriveBrowser(folder, folders, files){
     var safeId=f.id.replace(/'/g,"\\'");
     var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     html+='<div class="lv-card" style="border-left:3px solid var(--accent);" '+
-      'onclick="navTap(function(){openDriveFolder(\''+safeId+'\',\''+safeName+'\');})" ontouchstart="">'+
+      'ontouchend="event.preventDefault();navTap(function(){openDriveFolder(\''+safeId+'\',\''+safeName+'\');})" ontouchstart="">'+
       '<div class="lv-card-icon">📁</div>'+
       '<div class="lv-card-name">'+esc(f.name)+'</div>'+
       '<div class="lv-card-date">'+ds+'</div>'+
@@ -1143,7 +1179,7 @@ function renderDriveBrowser(folder, folders, files){
     var safeName=f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var safeMime=(f.mimeType||'').replace(/'/g,"\\'");
     html+='<div class="lv-card" '+
-      'onclick="navTap(function(){loadDriveFile(\''+safeId+'\',\''+safeName+'\',\''+safeMime+'\');})" ontouchstart="">'+
+      'ontouchend="event.preventDefault();navTap(function(){loadDriveFile(\''+safeId+'\',\''+safeName+'\',\''+safeMime+'\');})" ontouchstart="">'+
       '<div class="lv-card-icon">'+(isNative?'📊':'📋')+'</div>'+
       '<div class="lv-card-name">'+esc(name)+'</div>'+
       '<div class="lv-card-date">'+ds+' · '+ts+'</div>'+
